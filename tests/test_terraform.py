@@ -149,6 +149,28 @@ def test_empty_and_commentonly_files_are_safe(tmp_path):
     assert len(r["nodes"]) == 1
 
 
+def _node_by_label(r, label: str) -> dict:
+    return next(n for n in r["nodes"] if n["label"] == label)
+
+
+def test_iac_annotations_present(tmp_path):
+    # The shared IaCGraphBuilder tags every block with iac_lang/iac_kind, and
+    # resources/data with the provider iac_type, so link_iac can reason about
+    # Terraform and Bicep uniformly. variable -> "param", locals -> "var".
+    r = extract_terraform(_write(tmp_path, "main.tf", SAMPLE))
+    web = _node_by_label(r, "aws_instance.web")
+    assert web["iac_lang"] == "terraform"
+    assert web["iac_kind"] == "resource"
+    assert web["iac_type"] == "aws_instance"
+    assert _node_by_label(r, "data.aws_ami.ubuntu")["iac_kind"] == "data"
+    assert _node_by_label(r, "data.aws_ami.ubuntu")["iac_type"] == "aws_ami"
+    assert _node_by_label(r, "module.vpc")["iac_kind"] == "module"
+    assert _node_by_label(r, "var.region")["iac_kind"] == "param"
+    assert _node_by_label(r, "local.cidr")["iac_kind"] == "var"
+    assert _node_by_label(r, "output.ip")["iac_kind"] == "output"
+    assert _node_by_label(r, "provider.aws")["iac_kind"] == "provider"
+
+
 def test_tfvars_key_value_is_safe(tmp_path):
     # .tfvars files contain only key=value assignments (no block structure),
     # so extract_terraform produces zero block nodes — only the file node.
