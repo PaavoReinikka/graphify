@@ -79,6 +79,10 @@ class IaCGraphBuilder:
                 "id": nid, "label": label, "file_type": "code",
                 "source_file": self.str_path, "source_location": f"L{line}",
                 "iac_lang": self.lang, "iac_kind": kind,
+                # the bare declared name (last dotted component), uniform across
+                # languages: Bicep "storageId" and Terraform "output.ip" -> "ip".
+                # link_iac uses it to match outputs against app-code consumers.
+                "iac_name": name.split(".")[-1],
             }
             if iac_type:
                 node["iac_type"] = iac_type

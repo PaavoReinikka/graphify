@@ -89,8 +89,75 @@ def _derive_layer(parts: list[str]) -> str | None:
     return None
 
 
+# --- infra <-> app linking (Stage 4) -------------------------------------------
+# IaC `output` declarations are the explicit, published interface of a template,
+# so they are the highest-signal anchor for "which app code consumes this infra".
+# Matching is deliberately conservative (exact normalized name, length floor,
+# stoplist, uniqueness) and every edge is INFERRED — never EXTRACTED.
+_APP_LINK_MIN_LEN = 6          # skip short/generic output names
+_APP_LINK_MAX_MATCHES = 5      # a name matching many app nodes is too generic
+_APP_LINK_CONFIDENCE = 0.75    # contextual naming match (see how-it-works rubric)
+_APP_LINK_STOPLIST = frozenset({
+    "output", "result", "value", "location", "name", "id", "type", "key",
+    "data", "count", "index", "enabled", "version", "status", "config",
+    "string", "object", "array", "default", "params", "resource",
+})
+
+
 def _disabled() -> bool:
     return os.environ.get("GRAPHIFY_NO_IAC_LINK", "").strip().lower() in ("1", "true", "yes")
+
+
+def _norm_token(s: str) -> str:
+    from .ids import normalize_id
+    return normalize_id(s)
+
+
+def _link_app_consumers(G: nx.Graph, iac_node_ids: set[str]) -> None:
+    """Link IaC `output` declarations to the application-code symbols that share
+    their name. Emits INFERRED ``consumed_by`` edges (output -> app node).
+
+    High-precision by design: exact normalized-name match, a length floor, a
+    stoplist of generic names, and a requirement that the name be owned by exactly
+    one output and match only a handful of app symbols.
+    """
+    # 1. consumable anchors: outputs with a specific, unique name.
+    by_name: dict[str, list[str]] = defaultdict(list)
+    for nid in iac_node_ids:
+        data = G.nodes[nid]
+        if data.get("iac_kind") != "output":
+            continue
+        name = (data.get("iac_name") or "").strip()
+        tok = _norm_token(name)
+        if len(tok) < _APP_LINK_MIN_LEN or tok in _APP_LINK_STOPLIST:
+            continue
+        by_name[tok].append(nid)
+    anchors = {tok: ids[0] for tok, ids in by_name.items() if len(ids) == 1}
+    if not anchors:
+        return
+
+    # 2. app-code symbols: code nodes that are NOT infrastructure. Index by
+    #    normalized label so the match is a whole-symbol-name match, not substring.
+    app_by_tok: dict[str, list[str]] = defaultdict(list)
+    for nid, data in G.nodes(data=True):
+        if data.get("iac_lang") or data.get("file_type") != "code":
+            continue
+        tok = _norm_token(str(data.get("label", "")))
+        if tok in anchors:
+            app_by_tok[tok].append(nid)
+
+    # 3. emit INFERRED edges, skipping over-generic names that hit many symbols.
+    for tok, out_nid in anchors.items():
+        consumers = app_by_tok.get(tok, [])
+        if not consumers or len(consumers) > _APP_LINK_MAX_MATCHES:
+            continue
+        for app_nid in consumers:
+            if not G.has_edge(out_nid, app_nid):
+                G.add_edge(
+                    out_nid, app_nid, relation="consumed_by", confidence="INFERRED",
+                    confidence_score=_APP_LINK_CONFIDENCE, weight=1.0,
+                    source_file=G.nodes[app_nid].get("source_file"),
+                )
 
 
 def link_iac(G: nx.Graph) -> nx.Graph:
@@ -102,7 +169,9 @@ def link_iac(G: nx.Graph) -> nx.Graph:
       ``iac_layer`` (module/core/app) derived from its file path, so a dev vs prod
       stack and a reusable module vs an app stack stay distinguishable in queries
       and clustering;
-    * **resource-type hubs** — one concept node per ``iac_type`` with 2+ instances.
+    * **resource-type hubs** — one concept node per ``iac_type`` with 2+ instances;
+    * **infra↔app linking** — INFERRED ``consumed_by`` edges from an ``output`` to
+      the application-code symbol that shares its (specific, unique) name.
 
     A no-op when disabled or when the graph holds no IaC nodes at all.
     """
@@ -147,4 +216,7 @@ def link_iac(G: nx.Graph) -> nx.Graph:
                     nid, hub_id, relation="instance_of", confidence="EXTRACTED",
                     weight=1.0, source_file=G.nodes[nid].get("source_file"),
                 )
+
+    # 3. infra <-> app linking: outputs consumed by same-named app symbols.
+    _link_app_consumers(G, {nid for nid, _ in iac_nodes})
     return G

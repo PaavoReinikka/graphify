@@ -179,6 +179,112 @@ def test_multidir_module_deploys_resolves():
         assert v in G.nodes, f"deploys target {v} is dangling"
 
 
+def _output(nid, name, source_file="main.bicep"):
+    return {"id": nid, "label": f"output {name}", "file_type": "code",
+            "source_file": source_file, "source_location": "L1", "iac_lang": "bicep",
+            "iac_kind": "output", "iac_name": name}
+
+
+def _app(nid, label, source_file="app/main.py"):
+    return {"id": nid, "label": label, "file_type": "code",
+            "source_file": source_file, "source_location": "L1"}
+
+
+def test_app_consumer_linked_to_output():
+    nodes = [
+        _output("out_san", "storageAccountName"),
+        _app("app_san", "storageAccountName"),
+        _app("unrelated", "doSomethingElse"),
+    ]
+    G = build_from_json({"nodes": nodes, "edges": []})
+    consumed = [(u, v) for u, v, d in G.edges(data=True) if d.get("relation") == "consumed_by"]
+    assert ("out_san", "app_san") in consumed
+    # the edge is INFERRED, never EXTRACTED
+    assert G.edges["out_san", "app_san"]["confidence"] == "INFERRED"
+    # the unrelated app symbol is not linked
+    assert all(v != "unrelated" for _, v in consumed)
+
+
+def test_generic_output_names_do_not_link():
+    # short / stoplisted names must not spawn edges even with an exact match.
+    nodes = [
+        _output("out_name", "name"),
+        _output("out_id", "id"),
+        _output("out_loc", "location"),
+        _app("app_name", "name"),
+        _app("app_id", "id"),
+        _app("app_loc", "location"),
+    ]
+    G = build_from_json({"nodes": nodes, "edges": []})
+    assert not any(d.get("relation") == "consumed_by" for _, _, d in G.edges(data=True))
+
+
+def test_no_app_link_without_infra():
+    # pure app code (no IaC) -> link_iac no-ops, no consumed_by edges.
+    nodes = [_app("a", "storageAccountName"), _app("b", "storageAccountName2")]
+    G = build_from_json({"nodes": nodes, "edges": []})
+    assert not any(d.get("relation") == "consumed_by" for _, _, d in G.edges(data=True))
+
+
+def test_app_link_skips_overgeneric_match():
+    # an output name matching more than _APP_LINK_MAX_MATCHES app symbols is
+    # treated as too generic and produces no edges.
+    from graphify.iac_link import _APP_LINK_MAX_MATCHES
+    nodes = [_output("out_x", "connectionString")]
+    nodes += [_app(f"app{i}", "connectionString", f"app/m{i}.py")
+              for i in range(_APP_LINK_MAX_MATCHES + 1)]
+    G = build_from_json({"nodes": nodes, "edges": []})
+    assert not any(d.get("relation") == "consumed_by" for _, _, d in G.edges(data=True))
+
+
+def test_app_link_is_deterministic_and_idempotent():
+    nodes = [_output("out_san", "functionAppHostName"), _app("app_san", "functionAppHostName")]
+    G = build_from_json({"nodes": nodes, "edges": []})
+    counts = (G.number_of_nodes(), G.number_of_edges())
+    link_iac(G)
+    assert (G.number_of_nodes(), G.number_of_edges()) == counts
+
+
+def test_ambiguous_output_name_not_linked():
+    # the same specific name exported by two outputs (in different files, so they
+    # stay distinct nodes) is ambiguous -> skip.
+    nodes = [
+        _output("out_a", "storageAccountName", "stacks/a.bicep"),
+        _output("out_b", "storageAccountName", "stacks/b.bicep"),
+        _app("app_san", "storageAccountName"),
+    ]
+    G = build_from_json({"nodes": nodes, "edges": []})
+    assert not any(d.get("relation") == "consumed_by" for _, _, d in G.edges(data=True))
+
+
+def test_app_link_end_to_end_through_extract():
+    # A Bicep output and a TS app constant of the same name, run through the full
+    # extract() + build pipeline, must end up joined by a consumed_by edge.
+    import tempfile
+    from pathlib import Path
+    from graphify.extract import extract
+
+    d = Path(tempfile.mkdtemp())
+    (d / "infra").mkdir()
+    (d / "app").mkdir()
+    (d / "infra" / "main.bicep").write_text(
+        "resource fn 'Microsoft.Web/sites@2023-01-01' = {\n  name: 'fn'\n}\n"
+        "output functionAppHostName string = fn.properties.defaultHostName\n",
+        encoding="utf-8")
+    # a function the JS extractor captures as a symbol node (a bare `const` is not)
+    (d / "app" / "config.ts").write_text(
+        "export function functionAppHostName() { return process.env.FN_HOST; }\n",
+        encoding="utf-8")
+
+    paths = [d / "infra" / "main.bicep", d / "app" / "config.ts"]
+    res = extract(paths, cache_root=d)
+    G = build_from_json({"nodes": res["nodes"], "edges": res["edges"]}, root=d)
+    consumed = [(u, v, dd) for u, v, dd in G.edges(data=True)
+                if dd.get("relation") == "consumed_by"]
+    assert consumed, "expected a consumed_by edge from the bicep output to the TS const"
+    assert all(dd["confidence"] == "INFERRED" for _, _, dd in consumed)
+
+
 def test_hub_groups_instances_under_clustering():
     # The instance_of edges to a type hub should pull all instances into one
     # community (that's the point of the hub: a god-node for the type).
