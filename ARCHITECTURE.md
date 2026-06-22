@@ -10,13 +10,22 @@ detect()  →  extract()  →  build_graph()  →  cluster()  →  analyze()  �
 
 Each stage is a single function in its own module. They communicate through plain Python dicts and NetworkX graphs - no shared state, no side effects outside `graphify-out/`.
 
+`build_graph()` runs a **second build step** (`iac_link.link_iac`) on the merged
+graph: per-file extraction is local and parallel, but some infrastructure-as-code
+structure (e.g. that many resources share one type) is only visible once every
+file is in the graph. That pass is a no-op on non-IaC graphs and idempotent, so it
+is safe to run inside every `build_from_json` call. Set `GRAPHIFY_NO_IAC_LINK=1`
+to disable it.
+
 ## Module responsibilities
 
 | Module | Function | Input → Output |
 |--------|----------|----------------|
 | `detect.py` | `collect_files(root)` | directory → `[Path]` filtered list |
 | `extract.py` | `extract(path)` | file path → `{nodes, edges}` dict |
-| `build.py` | `build_graph(extractions)` | list of extraction dicts → `nx.Graph` |
+| `build.py` | `build_graph(extractions)` | list of extraction dicts → `nx.Graph` (runs `link_iac` as a second build step before returning) |
+| `iac.py` | `IaCGraphBuilder` | shared node/edge bookkeeping for the declarative infra-as-code extractors (Bicep, Terraform) |
+| `iac_link.py` | `link_iac(G)` | post-merge enrichment of infra graphs — resource-type hub nodes (and, later, cross-stack / infra↔app links); no-op on non-IaC graphs, idempotent |
 | `cluster.py` | `cluster(G)` | graph → graph with `community` attr on each node |
 | `analyze.py` | `analyze(G)` | graph → analysis dict (god nodes, surprises, questions) |
 | `report.py` | `render_report(G, analysis)` | graph + analysis → GRAPH_REPORT.md string |

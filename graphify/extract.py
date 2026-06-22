@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .cache import load_cached, save_cached
+from .iac import IaCGraphBuilder
 from .ids import make_id
 from .mcp_ingest import extract_mcp_config, is_mcp_config_path
 from .manifest_ingest import extract_package_manifest, is_package_manifest_path
@@ -12137,15 +12138,9 @@ def extract_terraform(path: Path) -> dict:
     except Exception as e:
         return {"nodes": [], "edges": [], "error": str(e)}
 
-    str_path = str(path)
-    file_nid = _make_id(str_path)
-    scope = path.parent.name or "tf"
-
-    nodes: list[dict] = [{"id": file_nid, "label": path.name, "file_type": "code",
-                          "source_file": str_path, "source_location": None}]
-    edges: list[dict] = []
-    seen_ids: set[str] = {file_nid}
-    seen_edges: set[tuple[str, str, str]] = set()
+    # Directory-scoped ids (parent dir name, not file stem) so a resource defined
+    # in main.tf resolves when referenced from a sibling .tf in the same module.
+    b = IaCGraphBuilder(path, lang="terraform", scope=path.parent.name or "tf")
 
     def _read(n) -> str:
         return source[n.start_byte:n.end_byte].decode("utf-8", errors="replace")
@@ -12153,28 +12148,11 @@ def extract_terraform(path: Path) -> dict:
     def _label_text(n) -> str:
         return _read(n).strip().strip('"')
 
-    def _add_node(address: str, label: str, line: int) -> str:
-        nid = _make_id(scope, address)
-        if nid not in seen_ids:
-            seen_ids.add(nid)
-            nodes.append({"id": nid, "label": label, "file_type": "code",
-                          "source_file": str_path, "source_location": f"L{line}"})
-            edges.append({"source": file_nid, "target": nid, "relation": "contains",
-                          "confidence": "EXTRACTED", "source_file": str_path,
-                          "source_location": f"L{line}", "weight": 1.0})
-        return nid
-
     def _add_edge(src: str, address: str, relation: str, line: int) -> None:
-        tgt = _make_id(scope, address)
-        if src == tgt:
-            return
-        key = (src, tgt, relation)
-        if key in seen_edges:
-            return
-        seen_edges.add(key)
-        edges.append({"source": src, "target": tgt, "relation": relation,
-                      "confidence": "EXTRACTED", "source_file": str_path,
-                      "source_location": f"L{line}", "weight": 1.0})
+        # Address-based resolution: emit unconditionally to the scoped id so a
+        # reference to a block defined in a sibling file resolves at merge time
+        # (require_known=False), unlike Bicep's file-local name resolution.
+        b.add_ref(src, address, relation, line, require_known=False)
 
     def _block_parts(block) -> tuple:
         btype = None
@@ -12250,18 +12228,24 @@ def extract_terraform(path: Path) -> dict:
         btype, labels = _block_parts(block)
         line = block.start_point[0] + 1
         blk_body = _body_of(block)
+        # kind uses the cross-language vocabulary shared with the Bicep extractor:
+        # a Terraform `variable` (external input) maps to "param" and `locals`
+        # (computed internal values) map to "var", so link_iac can reason about
+        # both languages uniformly.
         if btype == "resource" and len(labels) >= 2:
-            owner = _add_node(f"{labels[0]}.{labels[1]}", f"{labels[0]}.{labels[1]}", line)
+            owner = b.add_node(f"{labels[0]}.{labels[1]}", f"{labels[0]}.{labels[1]}", line,
+                               kind="resource", iac_type=labels[0])
         elif btype == "data" and len(labels) >= 2:
-            owner = _add_node(f"data.{labels[0]}.{labels[1]}", f"data.{labels[0]}.{labels[1]}", line)
+            owner = b.add_node(f"data.{labels[0]}.{labels[1]}", f"data.{labels[0]}.{labels[1]}", line,
+                               kind="data", iac_type=labels[0])
         elif btype == "module" and labels:
-            owner = _add_node(f"module.{labels[0]}", f"module.{labels[0]}", line)
+            owner = b.add_node(f"module.{labels[0]}", f"module.{labels[0]}", line, kind="module")
         elif btype == "variable" and labels:
-            owner = _add_node(f"var.{labels[0]}", f"var.{labels[0]}", line)
+            owner = b.add_node(f"var.{labels[0]}", f"var.{labels[0]}", line, kind="param")
         elif btype == "output" and labels:
-            owner = _add_node(f"output.{labels[0]}", f"output.{labels[0]}", line)
+            owner = b.add_node(f"output.{labels[0]}", f"output.{labels[0]}", line, kind="output")
         elif btype == "provider" and labels:
-            owner = _add_node(f"provider.{labels[0]}", f"provider.{labels[0]}", line)
+            owner = b.add_node(f"provider.{labels[0]}", f"provider.{labels[0]}", line, kind="provider")
         elif btype == "locals" and blk_body is not None:
             for attr in blk_body.children:
                 if attr.type != "attribute":
@@ -12270,7 +12254,7 @@ def extract_terraform(path: Path) -> dict:
                 if key_node is None:
                     continue
                 key = _read(key_node)
-                lnid = _add_node(f"local.{key}", f"local.{key}", attr.start_point[0] + 1)
+                lnid = b.add_node(f"local.{key}", f"local.{key}", attr.start_point[0] + 1, kind="var")
                 _collect_refs(attr, lnid, "references")
             continue
         else:
@@ -12278,7 +12262,178 @@ def extract_terraform(path: Path) -> dict:
         if blk_body is not None:
             _collect_refs(blk_body, owner, "references")
 
-    return {"nodes": nodes, "edges": edges}
+    return b.result()
+
+
+# Bicep call/decorator heads and loop builtins that are never references to a
+# declared symbol. Name-based resolution against the declared-symbol set already
+# excludes most of these (a builtin is not a declaration); this is a guard for
+# the rare case where a loop variable or builtin shadows a declared name.
+_BICEP_BUILTINS = frozenset({
+    "resourceGroup", "subscription", "tenant", "deployment", "managementGroup",
+    "range", "concat", "format", "union", "json", "reference", "resourceId",
+    "guid", "uniqueString", "loadTextContent", "loadFileAsBase64", "loadJsonContent",
+})
+
+
+def extract_bicep(path: Path) -> dict:
+    """Extract Bicep declarations and the references between them via tree-sitter.
+
+    Nodes: parameters, variables, resources, modules, and outputs. Edges:
+    `contains` (file -> declaration), `references` (declaration -> the symbols it
+    interpolates, e.g. a resource -> the `param` in its `location:` property),
+    `depends_on` (explicit `dependsOn` arrays), `parent` (resource nesting via
+    the `parent:` property), and `deploys` (module -> the `.bicep` file it
+    deploys).
+
+    Bicep is *file-scoped*: one `.bicep` file is one deployment template and
+    symbol names are unique within it, so references are resolved by name against
+    the declarations in the same file. Symbol ids are namespaced by the file-node
+    id so they ride `extract()`'s portable-id remap (matching every other code
+    extractor) instead of embedding an absolute path.
+    """
+    try:
+        import tree_sitter_bicep as tsb
+        from tree_sitter import Language, Parser
+    except ImportError:
+        return {"nodes": [], "edges": [],
+                "error": "tree_sitter_bicep not installed. Run: pip install tree-sitter-bicep"}
+
+    try:
+        language = Language(tsb.language())
+        parser = Parser(language)
+        source = path.read_bytes()
+        tree = parser.parse(source)
+        root = tree.root_node
+    except Exception as e:
+        return {"nodes": [], "edges": [], "error": str(e)}
+
+    b = IaCGraphBuilder(path, lang="bicep", scope=_file_node_id(path))
+
+    def _read(n) -> str:
+        return source[n.start_byte:n.end_byte].decode("utf-8", errors="replace")
+
+    def _decl_name(decl):
+        """First `identifier` child is the declared symbol name + its line."""
+        for c in decl.children:
+            if c.type == "identifier":
+                return _read(c), c.start_point[0] + 1
+        return None, None
+
+    def _type_label(decl) -> str:
+        """The single-quoted type/source string of a resource/module, if any."""
+        for c in decl.children:
+            if c.type == "string":
+                for gc in c.children:
+                    if gc.type == "string_content":
+                        return _read(gc)
+        return ""
+
+    def _decl_body(decl):
+        for c in decl.children:
+            if c.type in ("object", "for_statement", "if_statement"):
+                return c
+        return None
+
+    # ---- pass 1: declare every top-level symbol so references can resolve ----
+    decls = [c for c in root.children if c.type.endswith("_declaration")]
+    owners: list[tuple] = []
+    for decl in decls:
+        name, line = _decl_name(decl)
+        if not name:
+            continue
+        if decl.type == "parameter_declaration":
+            owner = b.add_node(name, f"param {name}", line, kind="param")
+        elif decl.type == "variable_declaration":
+            owner = b.add_node(name, f"var {name}", line, kind="var")
+        elif decl.type == "resource_declaration":
+            tlabel = _type_label(decl)
+            # strip the @api-version suffix for the structured iac_type
+            itype = tlabel.split("@", 1)[0] if tlabel else None
+            is_existing = any(c.type == "existing" for c in decl.children)
+            suffix = " (existing)" if is_existing else ""
+            owner = b.add_node(name, f"resource {name} [{tlabel}]{suffix}", line,
+                               kind="resource", iac_type=itype)
+        elif decl.type == "module_declaration":
+            modpath = _type_label(decl)
+            owner = b.add_node(name, f"module {name}", line, kind="module",
+                               iac_path=modpath or None)
+            # cross-file deploy edge -> the target .bicep file node. The target id
+            # is built from the path in the SAME form this extractor saw `path`
+            # (not resolved), so it matches the target file's own pre-remap id and
+            # extract()'s id_remap relativizes both consistently.
+            if modpath and modpath.endswith(".bicep"):
+                target = os.path.normpath(os.path.join(os.path.dirname(b.str_path), modpath))
+                b.add_edge_to_id(owner, make_id(str(target)), "deploys", line)
+        elif decl.type == "output_declaration":
+            owner = b.add_node(name, f"output {name}", line, kind="output")
+        else:
+            continue
+        owners.append((decl, owner))
+
+    # ---- pass 2: walk each declaration, emit references / depends_on / parent -
+    def _walk(node, owner_nid: str, relation: str, loop_vars: frozenset) -> None:
+        ntype = node.type
+
+        # `for x in ...:` introduces a loop variable that is not a reference.
+        if ntype == "for_statement":
+            init = node.child_by_field_name("initializer")
+            lv = loop_vars
+            if init is not None and init.type == "identifier":
+                lv = loop_vars | {_read(init)}
+            for c in node.children:
+                if c.is_named:
+                    _walk(c, owner_nid, relation, lv)
+            return
+
+        if ntype == "object_property":
+            key = node.children[0] if node.children else None
+            keyname = _read(key) if key is not None else ""
+            if keyname == "dependsOn":
+                for c in node.children:
+                    if c.type == "array":
+                        for el in c.children:
+                            if el.type == "identifier":
+                                b.add_ref(owner_nid, _read(el), "depends_on",
+                                          el.start_point[0] + 1, require_known=True)
+                return
+            if keyname == "parent":
+                for c in node.children[1:]:
+                    if c.type == "identifier":
+                        b.add_ref(owner_nid, _read(c), "parent",
+                                  c.start_point[0] + 1, require_known=True)
+                return
+
+        # a bare identifier, or the head (`.object`) of a member_expression
+        if ntype == "identifier":
+            nm = _read(node)
+            if nm not in loop_vars and nm not in _BICEP_BUILTINS:
+                b.add_ref(owner_nid, nm, relation, node.start_point[0] + 1,
+                          require_known=True)
+            return
+
+        if ntype == "member_expression":
+            obj = node.child_by_field_name("object")
+            if obj is not None:
+                _walk(obj, owner_nid, relation, loop_vars)
+            return  # the `.property` chain is attribute access, not a reference
+
+        for c in node.children:
+            if c.is_named:
+                _walk(c, owner_nid, relation, loop_vars)
+
+    for decl, owner in owners:
+        body = _decl_body(decl)
+        if body is not None:
+            _walk(body, owner, "references", frozenset())
+        # param/output default & value expressions live after `=`, outside the body
+        if decl.type in ("parameter_declaration", "output_declaration"):
+            for c in decl.children:
+                if c.is_named and c.type not in ("identifier", "type", "object",
+                                                 "for_statement", "if_statement"):
+                    _walk(c, owner, "references", frozenset())
+
+    return b.result()
 
 
 _DISPATCH: dict[str, Any] = {
@@ -12354,6 +12509,8 @@ _DISPATCH: dict[str, Any] = {
     ".tf": extract_terraform,
     ".tfvars": extract_terraform,
     ".hcl": extract_terraform,
+    ".bicep": extract_bicep,
+    ".bicepparam": extract_bicep,
     ".dm": extract_dm,
     ".dme": extract_dm,
     ".dmi": extract_dmi,
