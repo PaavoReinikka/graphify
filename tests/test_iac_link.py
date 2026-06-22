@@ -91,6 +91,94 @@ def test_terraform_and_bicep_share_type_hub():
     assert G.degree(hub) == 2
 
 
+def _resource_at(nid, itype, source_file):
+    return {"id": nid, "label": nid, "file_type": "code", "source_file": source_file,
+            "source_location": "L1", "iac_lang": "bicep", "iac_kind": "resource",
+            "iac_type": itype}
+
+
+@pytest.mark.parametrize("path,env", [
+    ("environments/prod/main.bicep", "prod"),
+    ("environments/dev/main.bicep", "dev"),
+    ("infra/staging/storage.bicep", "staging"),
+    ("envs/production/x.bicep", "prod"),       # token normalization
+    ("environments/edge/x.bicep", "edge"),     # custom env after anchor
+    ("modules/network/main.bicep", None),      # no env segment
+    ("prd/main.bicep", "prod"),
+])
+def test_env_derivation(path, env):
+    from graphify.iac_link import _derive_env, _path_parts
+    assert _derive_env(_path_parts(path)) == env
+
+
+@pytest.mark.parametrize("path,layer", [
+    ("modules/network/main.bicep", "module"),
+    ("core/identity/main.bicep", "core"),
+    ("common/naming.bicep", "core"),
+    ("apps/api/main.bicep", "app"),
+    ("services/worker/main.bicep", "app"),
+    ("environments/prod/main.bicep", None),
+    ("modules/core/main.bicep", "module"),     # module dir wins over core label
+])
+def test_layer_derivation(path, layer):
+    from graphify.iac_link import _derive_layer, _path_parts
+    assert _derive_layer(_path_parts(path)) == layer
+
+
+def test_scoping_attributes_set_on_build():
+    nodes = [
+        _resource_at("prodsa", "Microsoft.Storage/storageAccounts",
+                     "environments/prod/storage.bicep"),
+        _resource_at("devsa", "Microsoft.Storage/storageAccounts",
+                     "environments/dev/storage.bicep"),
+        _resource_at("modnsg", "Microsoft.Network/networkSecurityGroups",
+                     "modules/network/nsg.bicep"),
+    ]
+    G = build_from_json({"nodes": nodes, "edges": []})
+    assert G.nodes["prodsa"]["iac_env"] == "prod"
+    assert G.nodes["devsa"]["iac_env"] == "dev"
+    assert G.nodes["modnsg"]["iac_layer"] == "module"
+    # prod and dev storage stay distinguishable but still share the type hub
+    hub = _hub_id("Microsoft.Storage/storageAccounts")
+    assert hub in G and G.degree(hub) == 2
+
+
+def test_scoping_does_not_break_idempotency():
+    nodes = [_resource_at(f"sa{i}", "Microsoft.Storage/storageAccounts",
+                          f"environments/prod/sa{i}.bicep") for i in range(2)]
+    G = build_from_json({"nodes": nodes, "edges": []})
+    counts = (G.number_of_nodes(), G.number_of_edges())
+    link_iac(G)
+    assert (G.number_of_nodes(), G.number_of_edges()) == counts
+
+
+def test_multidir_module_deploys_resolves():
+    # A prod stack deploying a reusable module in another directory: the bicep
+    # deploys edge must resolve to the real module file node after the full
+    # extract() pipeline (directory-spanning monorepo layout).
+    import tempfile
+    from pathlib import Path
+    from graphify.extract import extract
+
+    d = Path(tempfile.mkdtemp())
+    (d / "environments" / "prod").mkdir(parents=True)
+    (d / "modules" / "network").mkdir(parents=True)
+    (d / "environments" / "prod" / "main.bicep").write_text(
+        "module net '../../modules/network/main.bicep' = {\n  name: 'n'\n}\n",
+        encoding="utf-8")
+    (d / "modules" / "network" / "main.bicep").write_text(
+        "param location string\noutput vnetId string = location\n", encoding="utf-8")
+
+    paths = [d / "environments" / "prod" / "main.bicep",
+             d / "modules" / "network" / "main.bicep"]
+    res = extract(paths, cache_root=d)
+    G = build_from_json({"nodes": res["nodes"], "edges": res["edges"]}, root=d)
+    deploys = [(u, v) for u, v, dd in G.edges(data=True) if dd.get("relation") == "deploys"]
+    assert deploys, "no deploys edge emitted"
+    for _, v in deploys:
+        assert v in G.nodes, f"deploys target {v} is dangling"
+
+
 def test_hub_groups_instances_under_clustering():
     # The instance_of edges to a type hub should pull all instances into one
     # community (that's the point of the hub: a god-node for the type).

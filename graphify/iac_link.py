@@ -40,31 +40,97 @@ _HUB_ID_PREFIX = "iac_type"
 # a lone resource would just gain a redundant parallel node.
 _MIN_INSTANCES_FOR_HUB = 2
 
+# --- monorepo scoping (Stage 3) ------------------------------------------------
+# Path segments are normalized to forward slashes and lowercased before matching.
+# Sensible defaults for common monorepo conventions (dev/prod, app vs core/common,
+# reusable modules at any depth); heuristic and may be made configurable later.
+_ENV_DIR_ANCHORS = ("environments", "environment", "envs", "env")
+_ENV_TOKENS = {
+    "dev": "dev", "develop": "dev", "development": "dev",
+    "test": "test", "tst": "test", "testing": "test",
+    "qa": "qa", "uat": "uat",
+    "stage": "staging", "staging": "staging", "stg": "staging", "preprod": "staging",
+    "prod": "prod", "production": "prod", "prd": "prod",
+    "sandbox": "sandbox", "sbx": "sandbox", "demo": "demo",
+}
+# layer precedence: a reusable-module dir wins over a stack-layer label.
+_LAYER_RULES = (
+    ("module", {"modules", "module", "_modules", ".modules"}),
+    ("core", {"core", "common", "shared", "platform", "foundation"}),
+    ("app", {"app", "apps", "application", "applications", "service",
+             "services", "workload", "workloads"}),
+)
+
+
+def _path_parts(source_file: str | None) -> list[str]:
+    if not source_file:
+        return []
+    return [p for p in source_file.replace("\\", "/").lower().split("/") if p]
+
+
+def _derive_env(parts: list[str]) -> str | None:
+    # Prefer the segment right after an environments/ anchor (honours custom names
+    # like environments/edge), then any standalone env token anywhere in the path.
+    for i, p in enumerate(parts[:-1]):
+        if p in _ENV_DIR_ANCHORS:
+            nxt = parts[i + 1]
+            return _ENV_TOKENS.get(nxt, nxt)
+    for p in parts:
+        if p in _ENV_TOKENS:
+            return _ENV_TOKENS[p]
+    return None
+
+
+def _derive_layer(parts: list[str]) -> str | None:
+    seen = set(parts)
+    for layer, tokens in _LAYER_RULES:
+        if seen & tokens:
+            return layer
+    return None
+
 
 def _disabled() -> bool:
     return os.environ.get("GRAPHIFY_NO_IAC_LINK", "").strip().lower() in ("1", "true", "yes")
 
 
 def link_iac(G: nx.Graph) -> nx.Graph:
-    """Add resource-type hub nodes + ``instance_of`` edges. Returns the same graph.
+    """Enrich an infra-as-code graph in place (and return it).
 
-    Mutates ``G`` in place (and returns it for convenience). A no-op when disabled
-    or when the graph holds no IaC nodes.
+    Two enrichments, both no-ops on non-IaC graphs and idempotent:
+
+    * **monorepo scoping** — tag every IaC node with ``iac_env`` (dev/prod/...) and
+      ``iac_layer`` (module/core/app) derived from its file path, so a dev vs prod
+      stack and a reusable module vs an app stack stay distinguishable in queries
+      and clustering;
+    * **resource-type hubs** — one concept node per ``iac_type`` with 2+ instances.
+
+    A no-op when disabled or when the graph holds no IaC nodes at all.
     """
     if _disabled():
         return G
 
-    # Instances = resource/data nodes carrying a concrete iac_type, excluding the
-    # hub nodes a prior run may have added (idempotency).
-    by_type: dict[str, list[str]] = defaultdict(list)
-    for nid, data in G.nodes(data=True):
-        itype = data.get("iac_type")
-        if not itype or data.get("iac_kind") == _HUB_KIND:
-            continue
-        by_type[itype].append(nid)
-
-    if not by_type:
+    # Every IaC declaration (any language), excluding hub nodes a prior run added.
+    iac_nodes = [(nid, data) for nid, data in G.nodes(data=True)
+                 if data.get("iac_lang") and data.get("iac_kind") != _HUB_KIND]
+    if not iac_nodes:
         return G  # not an IaC graph — leave it byte-identical
+
+    # 1. monorepo scoping: env + layer from the file path.
+    for nid, data in iac_nodes:
+        parts = _path_parts(data.get("source_file"))
+        env = _derive_env(parts)
+        layer = _derive_layer(parts)
+        if env is not None:
+            G.nodes[nid]["iac_env"] = env
+        if layer is not None:
+            G.nodes[nid]["iac_layer"] = layer
+
+    # 2. resource-type hubs: group instances of the same iac_type.
+    by_type: dict[str, list[str]] = defaultdict(list)
+    for nid, data in iac_nodes:
+        itype = data.get("iac_type")
+        if itype:
+            by_type[itype].append(nid)
 
     for itype, members in by_type.items():
         if len(members) < _MIN_INSTANCES_FOR_HUB:
