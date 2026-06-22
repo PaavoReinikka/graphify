@@ -294,7 +294,12 @@ def _reject_windows_path(value: str, source: str) -> None:
     Windows hooks path gets joined under the repo root and mkdir'd as a literal
     junk directory (backslashes and all), while install reports success and the
     real ``.git/hooks`` gets nothing. Fail loudly instead so the user can fix it.
+
+    On native Windows the same path IS valid and ``is_absolute()`` is True, so the
+    check must not fire there — only POSIX/WSL interpreters mishandle it.
     """
+    if sys.platform == "win32":
+        return
     if _WINDOWS_DRIVE_RE.match(value) or "\\" in value:
         raise RuntimeError(
             f"git hooks path from {source} looks like a Windows path: {value!r}. "
