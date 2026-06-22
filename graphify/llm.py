@@ -477,9 +477,9 @@ def _read_files(units: "list[Path | FileSlice]", root: Path) -> str:
     for u in units:
         p = unit_path(u)
         try:
-            rel = str(p.relative_to(root))
+            rel = p.relative_to(root).as_posix()
         except ValueError:
-            rel = str(p)
+            rel = p.as_posix()
         try:
             if isinstance(u, FileSlice):
                 content = read_slice_text(u)
@@ -583,9 +583,9 @@ def _build_image_refs(image_files: list[Path], root: Path, *, read_bytes: bool =
     refs: list[_ImageRef] = []
     for p in image_files:
         try:
-            rel = str(p.relative_to(root))
+            rel = p.relative_to(root).as_posix()
         except ValueError:
-            rel = str(p)
+            rel = p.as_posix()
         media = _IMAGE_MEDIA_TYPES.get(p.suffix.lower(), "image/png")
         raw: bytes | None = None
         if read_bytes:

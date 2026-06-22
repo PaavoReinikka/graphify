@@ -30,7 +30,10 @@ def _queue_pending(out_dir: Path, changed_paths: list[Path]) -> None:
         return
     out_dir.mkdir(parents=True, exist_ok=True)
     pending = out_dir / _PENDING_FILENAME
-    payload = "".join(f"{os.fspath(p)}\n" for p in changed_paths)
+    # as_posix (not os.fspath): keep the queue file portable with forward
+    # slashes so a path queued on Windows round-trips identically and matches
+    # the forward-slash convention used elsewhere (Path() reads it back fine).
+    payload = "".join(f"{p.as_posix()}\n" for p in changed_paths)
     with open(pending, "a", encoding="utf-8") as fh:
         fh.write(payload)
 
@@ -180,7 +183,7 @@ def _git_head() -> str | None:
     """Return current git HEAD commit hash, or None outside a repo."""
     import subprocess as _sp
     try:
-        r = _sp.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=3)
+        r = _sp.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, encoding="utf-8", timeout=3)
         return r.stdout.strip() if r.returncode == 0 else None
     except Exception:
         return None

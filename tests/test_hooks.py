@@ -348,9 +348,15 @@ def _set_hookspath(repo: Path, value: str) -> None:
     r"D:\hooks",
     r"some\back\slashed\path",
 ])
-def test_windows_hookspath_rejected_no_junk_dir(tmp_path, winpath):
+def test_windows_hookspath_rejected_no_junk_dir(tmp_path, winpath, monkeypatch):
     """A Windows-style core.hooksPath must raise (loud failure), not silently
-    create a backslash-named junk directory and report success (#1385)."""
+    create a backslash-named junk directory and report success (#1385).
+
+    This guards the POSIX/WSL interpreter path, where a ``C:\\...`` value is not
+    absolute and would be mkdir'd as junk; force POSIX semantics so the behavior
+    is exercised regardless of the host OS (on native Windows such a path is
+    genuinely valid and is accepted instead)."""
+    monkeypatch.setattr("sys.platform", "linux")
     repo = _make_git_repo(tmp_path)
     _set_hookspath(repo, winpath)
     with pytest.raises(RuntimeError, match="Windows path"):

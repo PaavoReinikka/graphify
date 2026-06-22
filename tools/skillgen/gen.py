@@ -545,6 +545,10 @@ def _git_show(ref: str) -> str:
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
+        # The skill blobs are UTF-8 (emoji, non-ASCII). Without an explicit
+        # encoding, text=True decodes with the locale codec — cp1252 on Windows —
+        # which raises UnicodeDecodeError on those bytes.
+        encoding="utf-8",
     )
     if result.returncode != 0:
         raise SystemExit(f"error: could not read {ref}: {result.stderr.strip()}")

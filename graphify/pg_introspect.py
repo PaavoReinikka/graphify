@@ -1,5 +1,5 @@
 from __future__ import annotations
-from pathlib import Path
+from pathlib import PurePosixPath
 from graphify.extract import extract_sql
 
 
@@ -135,7 +135,11 @@ def introspect_postgres(dsn: str | None = None) -> dict:
     info = psycopg.conninfo.conninfo_to_dict(dsn or "")
     host = info.get("host", "localhost")
     dbname = info.get("dbname", "db")
-    virtual_path = Path(f"postgresql://{host}/{dbname}")
+    # PurePosixPath (not Path): this is a virtual DSN label, not a filesystem
+    # path. Plain Path is WindowsPath on Windows and would render the separators
+    # as backslashes (postgresql:\host\db), giving non-portable node ids that
+    # differ from the same database introspected on Linux.
+    virtual_path = PurePosixPath(f"postgresql://{host}/{dbname}")
 
     # Pass virtual path and in-memory DDL content to extract_sql
     result = extract_sql(virtual_path, content=ddl_string)
