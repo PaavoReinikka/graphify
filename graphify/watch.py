@@ -183,7 +183,7 @@ def _git_head() -> str | None:
     """Return current git HEAD commit hash, or None outside a repo."""
     import subprocess as _sp
     try:
-        r = _sp.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=3)
+        r = _sp.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, encoding="utf-8", timeout=3)
         return r.stdout.strip() if r.returncode == 0 else None
     except Exception:
         return None
