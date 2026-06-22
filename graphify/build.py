@@ -332,6 +332,11 @@ def build_from_json(extraction: dict, *, directed: bool = False, root: str | Pat
     hyperedges = extraction.get("hyperedges", [])
     if hyperedges:
         G.graph["hyperedges"] = hyperedges
+    # Second build step: enrich infrastructure-as-code graphs with cross-cutting
+    # structure (resource-type hubs, ...). No-op on non-IaC graphs and idempotent,
+    # so every build_from_json caller (skill, CLI, merge) gets it for free.
+    from .iac_link import link_iac
+    link_iac(G)
     return G
 
 
