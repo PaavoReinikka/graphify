@@ -1150,7 +1150,7 @@ wheels = [
 
 [[package]]
 name = "graphifyy"
-version = "0.8.42"
+version = "0.8.44"
 source = { editable = "." }
 dependencies = [
     { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -1204,6 +1204,7 @@ all = [
     { name = "pypdf" },
     { name = "python-docx" },
     { name = "tiktoken" },
+    { name = "tree-sitter-bicep" },
     { name = "tree-sitter-dm" },
     { name = "tree-sitter-hcl" },
     { name = "tree-sitter-sql" },
@@ -1215,6 +1216,9 @@ anthropic = [
 ]
 bedrock = [
     { name = "boto3" },
+]
+bicep = [
+    { name = "tree-sitter-bicep" },
 ]
 chinese = [
     { name = "jieba" },
@@ -1297,6 +1301,7 @@ dev = [
     { name = "safety" },
     { name = "setuptools" },
     { name = "tomli", marker = "python_full_version < '3.11'" },
+    { name = "tree-sitter-bicep" },
     { name = "tree-sitter-hcl" },
     { name = "wheel" },
 ]
@@ -1347,6 +1352,8 @@ requires-dist = [
     { name = "tiktoken", marker = "extra == 'openai'" },
     { name = "tree-sitter", specifier = ">=0.23.0,<0.26" },
     { name = "tree-sitter-bash", specifier = ">=0.23,<0.27" },
+    { name = "tree-sitter-bicep", marker = "extra == 'all'", specifier = ">=1.1.0" },
+    { name = "tree-sitter-bicep", marker = "extra == 'bicep'", specifier = ">=1.1.0" },
     { name = "tree-sitter-c", specifier = ">=0.23,<0.25" },
     { name = "tree-sitter-c-sharp", specifier = ">=0.23,<0.25" },
     { name = "tree-sitter-cpp", specifier = ">=0.23,<0.25" },
@@ -1382,7 +1389,7 @@ requires-dist = [
     { name = "yt-dlp", marker = "extra == 'all'", specifier = ">=2026.6.9" },
     { name = "yt-dlp", marker = "extra == 'video'", specifier = ">=2026.6.9" },
 ]
-provides-extras = ["mcp", "neo4j", "falkordb", "pdf", "watch", "svg", "leiden", "office", "google", "postgres", "video", "kimi", "ollama", "bedrock", "anthropic", "gemini", "openai", "chinese", "sql", "dm", "terraform", "all"]
+provides-extras = ["mcp", "neo4j", "falkordb", "pdf", "watch", "svg", "leiden", "office", "google", "postgres", "video", "kimi", "ollama", "bedrock", "anthropic", "gemini", "openai", "chinese", "sql", "dm", "terraform", "bicep", "all"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1400,6 +1407,7 @@ dev = [
     { name = "safety", specifier = ">=3.7.0" },
     { name = "setuptools", specifier = ">=82.0.1" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0" },
+    { name = "tree-sitter-bicep", specifier = ">=1.1.0" },
     { name = "tree-sitter-hcl", specifier = ">=1.2.0" },
     { name = "wheel", specifier = ">=0.47.0" },
 ]
@@ -4740,6 +4748,21 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f7/a0/c3050a6277dfcac8c480f514dc4fe49f3f65f0eac68b4702cbaca2584e85/tree_sitter_bash-0.25.1-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:a3332d71c7b7d5f78259b19d02d0ea111fcb82b72712ee4a93aaa5b226d3f0a8", size = 230074, upload-time = "2025-12-02T17:01:05.05Z" },
     { url = "https://files.pythonhosted.org/packages/71/0f/203fe6b27211387f4b9ba8c4a321567ca4ded2624dae6ccdbd2b6e940e17/tree_sitter_bash-0.25.1-cp310-abi3-win_amd64.whl", hash = "sha256:52a6802d9218f86278aa3e8b459c3abdad67eed0fde1f9f13aca5b6c634217a6", size = 195574, upload-time = "2025-12-02T17:01:06.412Z" },
     { url = "https://files.pythonhosted.org/packages/47/75/4ca1a9fabd8fb5aea78cea70f7837ce4dbf2afae115f62051e5fa99cba1c/tree_sitter_bash-0.25.1-cp310-abi3-win_arm64.whl", hash = "sha256:59115057ec2bae319e8082ff29559861045002964c3431ccb0fc92aa4bc9bccb", size = 191196, upload-time = "2025-12-02T17:01:07.486Z" },
+]
+
+[[package]]
+name = "tree-sitter-bicep"
+version = "1.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ce/72/26ad0e2b0269ead9cf24b819f364a97be2e6121ff155caf1ee6be5056357/tree_sitter_bicep-1.1.0.tar.gz", hash = "sha256:189c1b0d71e67bf7266e0908d3c7228d07733c6433be8cee19ca195a158038ab", size = 56224, upload-time = "2024-12-22T03:27:59.895Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b1/12/00483ed7387f9863be21e76c72e6262024530969f9c8ff23facf2cded15b/tree_sitter_bicep-1.1.0-cp39-abi3-macosx_10_9_x86_64.whl", hash = "sha256:5bc74132d14a11af27681664974c4af002a1863344d99ff2de5a69955ed6fb60", size = 33405, upload-time = "2024-12-22T03:27:46.597Z" },
+    { url = "https://files.pythonhosted.org/packages/e9/b5/e9e5c65d4f5bae183c21aef17fdddbb44f0f9a2bfa5915f1734791f9ee35/tree_sitter_bicep-1.1.0-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:b1582a374f7964caefe557f2b5c23267efa6bfb7c4ed96ceb9f7c25d0b80a61e", size = 34614, upload-time = "2024-12-22T03:27:48.835Z" },
+    { url = "https://files.pythonhosted.org/packages/71/b2/b0f740efc755fcb887bf4bc0d0ecd0eeec80d2bcbb6e43b50ef0ac13f7dc/tree_sitter_bicep-1.1.0-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:ced527fe97cd37e4a81da483a0c76c4a779a5badde74e80930c71053d7a60ce2", size = 54672, upload-time = "2024-12-22T03:27:50.959Z" },
+    { url = "https://files.pythonhosted.org/packages/a8/04/6b118c263cfef2e3a37652ceee843490c073782073457c5183749bab2079/tree_sitter_bicep-1.1.0-cp39-abi3-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8dd7ed6f16898c5c16fbbb5e315dddf038f46592bef586fc45ddbc9864dad131", size = 55296, upload-time = "2024-12-22T03:27:53.009Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/4b/10b49ae46c8dea14feb72c8bba1e33a21eb8beaaca2cf6f40eb9be5495c0/tree_sitter_bicep-1.1.0-cp39-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:c4b097302359ecec93206d7205f97e51b1d521ded4c2a87393761693095ac208", size = 55414, upload-time = "2024-12-22T03:27:55.277Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/a5/92ca841908b836bc9ccb05aac400f2517b8fb256cd7f32c2d939568c6163/tree_sitter_bicep-1.1.0-cp39-abi3-win_amd64.whl", hash = "sha256:fe3e9621d427e826e2b6aa9fcd3eeba5527c7fec0fa640cfd1fa2a2ae7a67494", size = 34920, upload-time = "2024-12-22T03:27:56.202Z" },
+    { url = "https://files.pythonhosted.org/packages/b9/3b/9868031eb3924049da945fa99a59a7ea613078834452dfb71de41cef48df/tree_sitter_bicep-1.1.0-cp39-abi3-win_arm64.whl", hash = "sha256:3919df1f10268d6b0511b258b5cfc08db750ec373f444a189a717c8bb4510d5d", size = 34074, upload-time = "2024-12-22T03:27:59.015Z" },
 ]
 
 [[package]]
