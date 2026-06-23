@@ -48,6 +48,80 @@ graphify export callflow-html
 
 ---
 
+## In this fork
+
+This fork (`PaavoReinikka/graphify`) extends upstream with first-class
+**infrastructure-as-code** support — built primarily for Azure Bicep monorepos
+(complex module hierarchies, dev/prod environments, app vs core/common layers)
+alongside the application code that consumes the infrastructure.
+
+### Added
+
+- **Azure Bicep extraction** (`.bicep`, `.bicepparam`) — local tree-sitter AST,
+  no API calls. Resources, modules, params, vars, and outputs become nodes;
+  `references` (incl. nested-object and `member`-expression refs and string
+  interpolation), `depends_on` (from `dependsOn` arrays), `parent` (resource
+  nesting), and `deploys` (module → the `.bicep` file it deploys, resolved
+  across directories) become edges. `existing` resources are flagged; loop
+  variables and built-ins are never emitted as false references. Install with
+  the `bicep` extra (`uv tool install "graphifyy[bicep]"`).
+- **Generalized declarative-IaC extractor** — Bicep and Terraform now share one
+  `IaCGraphBuilder` (`graphify/iac.py`) and a common annotation vocabulary
+  (`iac_lang` / `iac_kind` / `iac_type` / `iac_name`), so both languages are
+  reasoned about uniformly. Terraform behavior is unchanged.
+- **Two-step build** (`graphify/iac_link.py::link_iac`) — a post-merge
+  enrichment pass run inside `build_from_json`, so the skill, CLI, and merge
+  paths all get it. It is a no-op on non-IaC graphs, idempotent, and opt-out via
+  `GRAPHIFY_NO_IAC_LINK=1`. It adds:
+  - **resource-type hub nodes** — one concept node per resource type with 2+
+    instances (a god-node for "everything that touches Storage / Key Vault"),
+    shared across Bicep and Terraform;
+  - **monorepo scoping** — `iac_env` (dev/test/staging/prod/…) and `iac_layer`
+    (module / core / app) derived from file paths, so dev vs prod and reusable
+    modules vs app stacks stay distinguishable in queries and clustering;
+  - **infra↔app linking** — `INFERRED` `consumed_by` edges from a Bicep/Terraform
+    `output` to the application-code symbol that shares its name (exact
+    normalized match, length floor, stoplist, uniqueness — high precision).
+- **Windows portability fixes** — POSIX forward-slash paths in emitted
+  `source_file`/queue/DSN values; `encoding="utf-8"` on every subprocess pipe and
+  bundled-file read (avoids cp1252 `UnicodeDecodeError` on non-ASCII — this
+  previously crashed the `claude-cli` backend and `graphify prs` on Windows); and
+  the git-hooks WSL guard no longer rejects valid native-Windows hooks paths.
+
+### Recommended usage (no API key, Claude Code as the LLM endpoint)
+
+Code and infrastructure are extracted locally (tree-sitter AST) and need **no
+LLM at all**. For the parts that do need a model — docs, PDFs, images,
+transcripts — this fork is meant to run with **Claude Code as the synthetic LLM
+endpoint via your subscription**, with no API key:
+
+```bash
+# code/IaC only — fully offline, no key, no backend flag needed:
+graphify extract ./infra
+
+# whole repo (code + docs/images) using the Claude Code CLI as the model:
+graphify extract . --backend claude-cli
+```
+
+`--backend claude-cli` routes semantic extraction through the local `claude`
+binary (Claude Code), so it uses your Claude subscription instead of an
+`ANTHROPIC_API_KEY`. Inside the `/graphify` skill the IDE session already
+provides the model, so no key is needed there either.
+
+### Planned / deferred
+
+- **Embeddings / hybrid retrieval** — optional embedding-backed query that blends
+  cosine similarity with the existing lexical TF-IDF, for natural-language
+  questions whose words don't appear in node labels (opt-in; keeps the offline
+  default). Tabled for now.
+- **Broader IaC coverage** — ARM templates, Kubernetes manifests, and Pulumi via
+  the same generalized extractor; plus Terraform local-module *source*
+  resolution (its sources are directory refs rather than single files).
+- **Read-hook on native Windows** — the Claude Code Read/Glob graph-nudge hook is
+  currently a POSIX `sh` one-liner and does not run on native Windows.
+
+---
+
 ## Prerequisites
 
 | Requirement | Minimum | Check | Install |
