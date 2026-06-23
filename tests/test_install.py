@@ -79,8 +79,8 @@ def test_install_project_claude_writes_project_scope(tmp_path, monkeypatch, caps
     assert (project / ".claude" / "skills" / "graphify" / "SKILL.md").exists()
     assert (project / ".claude" / "CLAUDE.md").exists()
     assert not (home / ".claude" / "skills" / "graphify" / "SKILL.md").exists()
-    assert ".claude/skills/graphify/SKILL.md" in (project / ".claude" / "CLAUDE.md").read_text()
-    assert "~/.claude/skills/graphify/SKILL.md" not in (project / ".claude" / "CLAUDE.md").read_text()
+    assert ".claude/skills/graphify/SKILL.md" in (project / ".claude" / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "~/.claude/skills/graphify/SKILL.md" not in (project / ".claude" / "CLAUDE.md").read_text(encoding="utf-8")
     assert "git add .claude/" in capsys.readouterr().out
 
 
@@ -213,7 +213,7 @@ def test_codex_skill_contains_spawn_agent():
     """Codex skill file must reference spawn_agent."""
     import graphify
 
-    skill = (Path(graphify.__file__).parent / "skill-codex.md").read_text()
+    skill = (Path(graphify.__file__).parent / "skill-codex.md").read_text(encoding="utf-8")
     assert "spawn_agent" in skill
 
 
@@ -225,7 +225,7 @@ def test_codex_skill_uses_graphify_with_existing_graph():
     fast-path block, which jumps straight to the query flow when a graph exists.
     """
     import graphify
-    skill = (Path(graphify.__file__).parent / "skill-codex.md").read_text()
+    skill = (Path(graphify.__file__).parent / "skill-codex.md").read_text(encoding="utf-8")
     assert "Fast path — existing graph" in skill
     assert "skip Steps 1–5 entirely and jump straight to `## For /graphify query`" in skill
     assert "graphify query" in skill
@@ -235,7 +235,7 @@ def test_codex_skill_uses_graphify_with_existing_graph():
 
 def test_codex_agents_install_mentions_dirty_graph_output(tmp_path):
     _agents_install(tmp_path, "codex")
-    content = (tmp_path / "AGENTS.md").read_text()
+    content = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
     assert "Dirty graphify-out/ files are expected" in content
     assert "not a reason to skip graphify" in content
 
@@ -244,7 +244,7 @@ def test_opencode_skill_contains_mention():
     """OpenCode skill file must reference @mention."""
     import graphify
 
-    skill = (Path(graphify.__file__).parent / "skill-opencode.md").read_text()
+    skill = (Path(graphify.__file__).parent / "skill-opencode.md").read_text(encoding="utf-8")
     assert "@mention" in skill
 
 
@@ -260,7 +260,7 @@ def test_opencode_skill_uses_opencode_agent_guidance():
     """
     import graphify
 
-    skill = (Path(graphify.__file__).parent / "skill-opencode.md").read_text()
+    skill = (Path(graphify.__file__).parent / "skill-opencode.md").read_text(encoding="utf-8")
     assert "@mention" in skill
     assert "@agent" in skill
     # Scope the agent-type check to opencode's dispatch slot (B2 -> B3).
@@ -274,7 +274,7 @@ def test_kilo_skill_mentions_task_tool():
     """Kilo skill file should use the native Task tool flow."""
     import graphify
 
-    skill = (Path(graphify.__file__).parent / "skill-kilo.md").read_text()
+    skill = (Path(graphify.__file__).parent / "skill-kilo.md").read_text(encoding="utf-8")
     assert "Task" in skill
 
 
@@ -283,7 +283,7 @@ def test_kilo_skill_avoids_double_quoted_python_c_fstring_dict_keys():
     import re
     import graphify
 
-    skill = (Path(graphify.__file__).parent / "skill-kilo.md").read_text()
+    skill = (Path(graphify.__file__).parent / "skill-kilo.md").read_text(encoding="utf-8")
     assert not re.search(r"print\(f'.*\[[\"'][^\"']+[\"']\]", skill)
 
 
@@ -296,7 +296,7 @@ def test_claw_skill_uses_agent_tool_dispatch():
     """
     import graphify
 
-    skill = (Path(graphify.__file__).parent / "skill-claw.md").read_text()
+    skill = (Path(graphify.__file__).parent / "skill-claw.md").read_text(encoding="utf-8")
     b2 = skill[skill.index("**Step B2"):skill.index("**Step B3")]
     assert 'subagent_type="general-purpose"' in b2
     assert "spawn_agent" not in skill
@@ -371,7 +371,7 @@ def test_codebuddy_install_merges_existing_codebuddy_md(tmp_path):
     from graphify.__main__ import codebuddy_install
     (tmp_path / "CODEBUDDY.md").write_text("# My project rules\n")
     codebuddy_install(tmp_path)
-    content = (tmp_path / "CODEBUDDY.md").read_text()
+    content = (tmp_path / "CODEBUDDY.md").read_text(encoding="utf-8")
     assert "# My project rules" in content
     assert "graphify-out/GRAPH_REPORT.md" in content
 
@@ -548,7 +548,7 @@ def test_agents_install_idempotent(tmp_path):
     """Installing twice does not duplicate the section."""
     _agents_install(tmp_path, "codex")
     _agents_install(tmp_path, "codex")
-    content = (tmp_path / "AGENTS.md").read_text()
+    content = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
     assert content.count("## graphify") == 1
 
 
@@ -718,7 +718,7 @@ def test_kilo_agents_install_idempotent(tmp_path):
 
     _agents_install(tmp_path, "kilo")
     _agents_install(tmp_path, "kilo")
-    content = (tmp_path / "AGENTS.md").read_text()
+    content = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
     config = _json.loads((tmp_path / ".kilo" / "kilo.json").read_text())
     plugin_uri = (tmp_path / ".kilo" / "plugins" / "graphify.js").resolve().as_uri()
     assert content.count("## graphify") == 1
@@ -838,7 +838,7 @@ def test_gemini_install_merges_existing_gemini_md(tmp_path):
 
     (tmp_path / "GEMINI.md").write_text("# My project rules\n")
     gemini_install(tmp_path)
-    content = (tmp_path / "GEMINI.md").read_text()
+    content = (tmp_path / "GEMINI.md").read_text(encoding="utf-8")
     assert "# My project rules" in content
     assert "graphify-out/GRAPH_REPORT.md" in content
 
