@@ -4065,20 +4065,27 @@ def main() -> None:
     elif cmd == "cochange":
         # Optional: enrich graph.json with statistically-significant co-change
         # edges via the standalone `graphmine` tool (no hard dependency).
-        from graphify.cochange import enrich_with_cochange
+        from graphify.cochange import enrich_with_cochange, update_instructions
 
         rest = sys.argv[2:]
-        repo, graph_arg = ".", None
+        repo, graph_arg, repo_set = ".", None, False
         correction, alpha, depth, include_deleted = "bh", 0.05, 1, False
+        update_instr = False
+        passthrough: list[str] = []   # unrecognized args forwarded to graphmine
         i = 0
         while i < len(rest):
             a = rest[i]
             if a in ("-h", "--help"):
                 print("Usage: graphify cochange [repo] [--graph PATH] "
                       "[--correction {none,bonferroni,bh,by}] [--alpha A] "
-                      "[--subsystem-depth N] [--include-deleted]")
+                      "[--subsystem-depth N] [--include-deleted] "
+                      "[--update-instructions]")
                 print("  Augment graph.json with co_changes_with edges mined from git")
                 print("  history (requires the optional 'graphmine' tool on PATH).")
+                print("  --update-instructions  add a co-change section to graphify-")
+                print("                         configured CLAUDE.md/AGENTS.md/etc.")
+                print("  Unrecognized flags are forwarded to graphmine "
+                      "(e.g. --min-freq, --max-commit-files, --measure).")
                 return
             if a == "--graph" and i + 1 < len(rest):
                 graph_arg = rest[i + 1]; i += 2; continue
@@ -4090,17 +4097,25 @@ def main() -> None:
                 depth = int(rest[i + 1]); i += 2; continue
             if a == "--include-deleted":
                 include_deleted = True; i += 1; continue
-            if not a.startswith("-"):
-                repo = a; i += 1; continue
-            i += 1
+            if a == "--update-instructions":
+                update_instr = True; i += 1; continue
+            if not a.startswith("-") and not repo_set:
+                repo = a; repo_set = True; i += 1; continue
+            # anything else (unknown flag, or a stray token) -> forward to graphmine
+            passthrough.append(a); i += 1
         graph_path = Path(graph_arg or _default_graph_path())
         if not graph_path.exists():
             print(f"error: graph not found at {graph_path}; build it first with "
                   f"`graphify extract`", file=sys.stderr)
             return
-        enrich_with_cochange(Path(repo), graph_path, graph_path.parent,
-                             correction=correction, alpha=alpha,
-                             subsystem_depth=depth, include_deleted=include_deleted)
+        rc = enrich_with_cochange(Path(repo), graph_path, graph_path.parent,
+                                  correction=correction, alpha=alpha,
+                                  subsystem_depth=depth, include_deleted=include_deleted,
+                                  extra_args=passthrough or None)
+        # Only touch instruction files when the co-change layer was actually
+        # produced (graphmine present and succeeded) — opt-in via the flag.
+        if update_instr and rc == 0:
+            update_instructions(Path(repo))
 
     elif cmd == "global":
         subcmd = sys.argv[2] if len(sys.argv) > 2 else ""

@@ -44,6 +44,51 @@ def test_builds_expected_command_when_present(tmp_path):
     assert captured["kwargs"].get("encoding") == "utf-8"
 
 
+_BASE_BLOCK = (
+    "# Project notes\n\nSome text.\n\n"
+    "## graphify\n\nThis project has a knowledge graph at graphify-out/.\n\n"
+    "Rules:\n- run `graphify query`\n"
+)
+
+
+def test_update_instructions_adds_section_to_graphify_files(tmp_path):
+    claude = tmp_path / "CLAUDE.md"
+    claude.write_text(_BASE_BLOCK, encoding="utf-8")
+    (tmp_path / "AGENTS.md").write_text(_BASE_BLOCK, encoding="utf-8")
+    (tmp_path / "README.md").write_text("# no graphify block here\n", encoding="utf-8")
+
+    updated = cochange.update_instructions(tmp_path)
+
+    assert set(updated) == {claude, tmp_path / "AGENTS.md"}
+    text = claude.read_text(encoding="utf-8")
+    assert cochange._COCHANGE_MARKER in text
+    assert "co_changes_with" in text
+    # base block preserved
+    assert "This project has a knowledge graph" in text
+    # the unrelated file is untouched
+    assert cochange._COCHANGE_MARKER not in (tmp_path / "README.md").read_text(encoding="utf-8")
+
+
+def test_update_instructions_is_idempotent(tmp_path):
+    claude = tmp_path / "CLAUDE.md"
+    claude.write_text(_BASE_BLOCK, encoding="utf-8")
+    cochange.update_instructions(tmp_path)
+    once = claude.read_text(encoding="utf-8")
+    cochange.update_instructions(tmp_path)
+    twice = claude.read_text(encoding="utf-8")
+    assert once == twice
+    assert once.count(cochange._COCHANGE_MARKER) == 1
+
+
+def test_update_instructions_skips_non_configured_and_absent(tmp_path):
+    # CLAUDE.md exists but has no graphify block -> not touched; others absent.
+    plain = tmp_path / "CLAUDE.md"
+    plain.write_text("# just my notes\n", encoding="utf-8")
+    updated = cochange.update_instructions(tmp_path)
+    assert updated == []
+    assert cochange._COCHANGE_MARKER not in plain.read_text(encoding="utf-8")
+
+
 def test_graphmine_available_reflects_path():
     with patch("graphify.cochange.shutil.which", return_value=None):
         assert cochange.graphmine_available() is False
