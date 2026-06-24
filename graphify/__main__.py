@@ -2210,6 +2210,7 @@ def main() -> None:
         print("  global list              list repos in the global graph")
         print("  global path              print path to the global graph file")
         print("  benchmark [graph.json]  measure token reduction vs naive full-corpus approach")
+        print("  cochange [repo]         add co_changes_with edges from git history (needs 'graphmine')")
         print("  export callflow-html    emit Mermaid-based architecture/call-flow HTML")
         print("  hook install            install post-commit/post-checkout git hooks (all platforms)")
         print("  hook uninstall          remove git hooks")
@@ -3895,6 +3896,46 @@ def main() -> None:
                 pass
         result = run_benchmark(graph_path, corpus_words=corpus_words)
         print_benchmark(result)
+
+    elif cmd == "cochange":
+        # Optional: enrich graph.json with statistically-significant co-change
+        # edges via the standalone `graphmine` tool (no hard dependency).
+        from graphify.cochange import enrich_with_cochange
+
+        rest = sys.argv[2:]
+        repo, graph_arg = ".", None
+        correction, alpha, depth, include_deleted = "bh", 0.05, 1, False
+        i = 0
+        while i < len(rest):
+            a = rest[i]
+            if a in ("-h", "--help"):
+                print("Usage: graphify cochange [repo] [--graph PATH] "
+                      "[--correction {none,bonferroni,bh,by}] [--alpha A] "
+                      "[--subsystem-depth N] [--include-deleted]")
+                print("  Augment graph.json with co_changes_with edges mined from git")
+                print("  history (requires the optional 'graphmine' tool on PATH).")
+                return
+            if a == "--graph" and i + 1 < len(rest):
+                graph_arg = rest[i + 1]; i += 2; continue
+            if a == "--correction" and i + 1 < len(rest):
+                correction = rest[i + 1]; i += 2; continue
+            if a == "--alpha" and i + 1 < len(rest):
+                alpha = float(rest[i + 1]); i += 2; continue
+            if a == "--subsystem-depth" and i + 1 < len(rest):
+                depth = int(rest[i + 1]); i += 2; continue
+            if a == "--include-deleted":
+                include_deleted = True; i += 1; continue
+            if not a.startswith("-"):
+                repo = a; i += 1; continue
+            i += 1
+        graph_path = Path(graph_arg or _default_graph_path())
+        if not graph_path.exists():
+            print(f"error: graph not found at {graph_path}; build it first with "
+                  f"`graphify extract`", file=sys.stderr)
+            return
+        enrich_with_cochange(Path(repo), graph_path, graph_path.parent,
+                             correction=correction, alpha=alpha,
+                             subsystem_depth=depth, include_deleted=include_deleted)
 
     elif cmd == "global":
         subcmd = sys.argv[2] if len(sys.argv) > 2 else ""
