@@ -87,6 +87,14 @@ alongside the application code that consumes the infrastructure.
   bundled-file read (avoids cp1252 `UnicodeDecodeError` on non-ASCII — this
   previously crashed the `claude-cli` backend and `graphify prs` on Windows); and
   the git-hooks WSL guard no longer rejects valid native-Windows hooks paths.
+- **Co-change enrichment** (optional) — `graphify cochange [repo] --graph graph.json`
+  augments a built graph with statistically-significant **`co_changes_with`** edges
+  mined from git history (a new `STATISTICAL` confidence tier, FDR-corrected
+  q-value as the score) — couplings that static structure can't see (files
+  generated together, dev↔prod params, a SQL table and its triggers). It shells
+  out to the standalone [graphmine](https://github.com/PaavoReinikka/graphmine)
+  tool (no hard dependency; a friendly no-op if graphmine isn't installed) and is
+  fully additive — the original `graph.json` is left untouched.
 
 ### Recommended usage (no API key, Claude Code as the LLM endpoint)
 
