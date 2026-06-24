@@ -141,8 +141,19 @@ This writes `graphify-out/cochange.md` (a clustered digest) and
 `co_changes_with` edges — a `STATISTICAL` confidence tier carrying the
 FDR-corrected q-value); `graph.json` is left untouched. `graphify cochange --help`
 lists the knobs (`--correction {none,bonferroni,bh,by}`, `--alpha`,
-`--subsystem-depth`, `--include-deleted`). If graphmine isn't on PATH the command
-is a friendly no-op with an install hint.
+`--subsystem-depth`, `--include-deleted`); any unrecognized flags are forwarded
+to graphmine. If graphmine isn't on PATH the command is a friendly no-op with an
+install hint.
+
+Add `--update-instructions` to also teach your assistant about the layer: it
+appends a `## graphify: co-change` section (telling the model to use the
+co-change layer for impact / refactoring questions) to every graphify-configured
+instruction file (`CLAUDE.md`, `AGENTS.md`, …). It's **opt-in**, idempotent, and
+only touches files that already have graphify's `## graphify` block:
+
+```bash
+graphify cochange . --subsystem-depth 2 --update-instructions
+```
 
 ### Using Claude Code as the model
 
