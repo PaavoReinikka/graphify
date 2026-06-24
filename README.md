@@ -111,6 +111,41 @@ graphify extract ./infra
 graphify extract . --backend claude-cli
 ```
 
+### Co-change enrichment with graphmine (optional)
+
+[graphmine](https://github.com/PaavoReinikka/graphmine) mines statistically
+significant **co-change** couplings from git history — files that evolve together
+far more than chance (generated-together files, dev↔prod params, a SQL table and
+its triggers) — which static structure can't see. It is a standalone tool
+(Kingfisher-powered); `graphify cochange` shells out to it.
+
+**Install it once.** graphmine depends on the Kingfisher engine, which isn't on
+PyPI yet, so clone both side by side and install graphmine (this builds
+Kingfisher and needs a **Rust toolchain** — `cargo`):
+
+```bash
+git clone https://github.com/PaavoReinikka/graphmine
+git clone https://github.com/PaavoReinikka/BranchAndBound   # the Kingfisher engine
+uv tool install ./graphmine                                  # resolves ../BranchAndBound/kingfisher
+```
+
+**Use it** — build the graph, then add the co-change layer:
+
+```bash
+graphify extract . --backend claude-cli      # build graphify-out/graph.json
+graphify cochange . --subsystem-depth 2       # add co_changes_with edges
+```
+
+This writes `graphify-out/cochange.md` (a clustered digest) and
+`graphify-out/cochange.graphify.json` (a copy of the graph **plus** additive
+`co_changes_with` edges — a `STATISTICAL` confidence tier carrying the
+FDR-corrected q-value); `graph.json` is left untouched. `graphify cochange --help`
+lists the knobs (`--correction {none,bonferroni,bh,by}`, `--alpha`,
+`--subsystem-depth`, `--include-deleted`). If graphmine isn't on PATH the command
+is a friendly no-op with an install hint.
+
+### Using Claude Code as the model
+
 `--backend claude-cli` routes semantic extraction through the local `claude`
 binary (Claude Code), so it uses your Claude subscription instead of an
 `ANTHROPIC_API_KEY`. Inside the `/graphify` skill the IDE session already
