@@ -12,6 +12,7 @@ from typing import Callable
 
 from graphify.extractors.apex import extract_apex
 from graphify.extractors.bash import extract_bash
+from graphify.extractors.bicep import extract_bicep
 from graphify.extractors.blade import extract_blade
 from graphify.extractors.cobol import extract_cobol
 from graphify.extractors.commonlisp import extract_commonlisp
@@ -42,6 +43,7 @@ from graphify.extractors.zig import extract_zig
 LANGUAGE_EXTRACTORS: dict[str, Callable[[Path], dict]] = {
     "apex": extract_apex,
     "bash": extract_bash,
+    "bicep": extract_bicep,
     "blade": extract_blade,
     "cobol": extract_cobol,
     "commonlisp": extract_commonlisp,

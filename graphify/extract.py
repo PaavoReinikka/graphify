@@ -36,6 +36,7 @@ from graphify.extractors.base import (  # noqa: F401
 )
 from graphify.extractors.apex import extract_apex  # noqa: F401
 from graphify.extractors.bash import extract_bash  # noqa: F401
+from graphify.extractors.bicep import extract_bicep  # noqa: F401
 from graphify.extractors.blade import extract_blade  # noqa: F401
 from graphify.extractors.cobol import extract_cobol  # noqa: F401
 from graphify.extractors.csharp import (
@@ -6694,6 +6695,8 @@ _DISPATCH: dict[str, Any] = {
     ".tf": extract_terraform,
     ".tfvars": extract_terraform,
     ".hcl": extract_terraform,
+    ".bicep": extract_bicep,
+    ".bicepparam": extract_bicep,
     ".dm": extract_dm,
     ".dme": extract_dm,
     ".dmi": extract_dmi,
@@ -6729,6 +6732,8 @@ _EXTRA_FOR_EXTENSION = {
     ".tf": "terraform",
     ".tfvars": "terraform",
     ".hcl": "terraform",
+    ".bicep": "bicep",
+    ".bicepparam": "bicep",
     ".dm": "dm",
     ".dme": "dm",
     ".ml": "ocaml",
