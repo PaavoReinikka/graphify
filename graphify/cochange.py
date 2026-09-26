@@ -42,8 +42,8 @@ Rules:
   a SQL table and its triggers.
 - When editing or assessing a file, check its co-change partners in
   `graphify-out/cochange.md` and weigh them in "what else might need to change".
-- `graphify affected <file> --graph graphify-out/cochange.graphify.json` gives a
-  blast radius that includes co-change partners (hits tagged `[co_changes_with]`).
+- `graphify affected <file>` (or the MCP `affected` tool) gives a blast radius
+  that includes co-change partners (hits tagged `[co_changes_with]`).
 - These edges are statistical hints, not guarantees — weight them by the p-value.
 """
 
@@ -125,6 +125,58 @@ def affected_relations(graph, defaults: tuple[str, ...]) -> tuple[str, ...]:
     if any(d.get("relation") == COCHANGE_RELATION for _, _, d in graph.edges(data=True)):
         return (*defaults, COCHANGE_RELATION)
     return defaults
+
+
+COCHANGE_GRAPH_NAME = "cochange.graphify.json"
+_overlay_cache: dict[str, tuple[tuple[int, int], list[tuple[str, str, dict]]]] = {}
+
+
+def cochange_overlay_edges(graph_path: "str | Path") -> list[tuple[str, str, dict]]:
+    """``co_changes_with`` edges from the ``cochange.graphify.json`` next to
+    *graph_path*, or ``[]`` when there is none (or *graph_path* is that file).
+    Cached on the sidecar's mtime/size, so a re-run of `graphify cochange` is
+    picked up without restarting a long-lived MCP server."""
+    import json
+
+    gp = Path(graph_path)
+    side = gp.parent / COCHANGE_GRAPH_NAME
+    if gp.name == COCHANGE_GRAPH_NAME or not side.is_file():
+        return []
+    st = side.stat()
+    key = (st.st_mtime_ns, st.st_size)
+    hit = _overlay_cache.get(str(side))
+    if hit and hit[0] == key:
+        return hit[1]
+    try:
+        data = json.loads(side.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    links = data.get("links") if isinstance(data.get("links"), list) else data.get("edges", [])
+    edges = [
+        (str(e["source"]), str(e["target"]), dict(e))
+        for e in links
+        if isinstance(e, dict) and e.get("relation") == COCHANGE_RELATION
+        and "source" in e and "target" in e
+    ]
+    _overlay_cache[str(side)] = (key, edges)
+    return edges
+
+
+def with_cochange_overlay(G, graph_path: "str | Path"):
+    """*G* for blast-radius queries: unchanged if it already carries co-change
+    edges or no sidecar exists, else a copy with the sidecar's edges added
+    between nodes that still exist (a stale sidecar never invents nodes)."""
+    if any(d.get("relation") == COCHANGE_RELATION for _, _, d in G.edges(data=True)):
+        return G
+    overlay = [(u, v, d) for u, v, d in cochange_overlay_edges(graph_path)
+               if u in G and v in G and not G.has_edge(u, v)]
+    if not overlay:
+        return G
+    H = G.copy()
+    for u, v, d in overlay:
+        attrs = {k: v2 for k, v2 in d.items() if k not in ("source", "target")}
+        H.add_edge(u, v, **attrs)
+    return H
 
 
 def run_cli(argv: list[str]) -> None:

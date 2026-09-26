@@ -91,6 +91,37 @@ def _load_graph(graph_path: str) -> nx.Graph:
         sys.exit(1)
 
 
+_CORE_CONFIDENCE_TIERS = ("EXTRACTED", "INFERRED", "AMBIGUOUS")
+
+
+def _confidence_breakdown(G: nx.Graph, *, counts: bool) -> str:
+    """Per-tier edge confidence lines. The three core tiers always print (the
+    historical format); any other tier present — e.g. graphmine's STATISTICAL
+    co-change edges — gets its own line instead of silently vanishing from the
+    percentages. Fork addition."""
+    from collections import Counter
+    confs = Counter(d.get("confidence", "EXTRACTED") for _, _, d in G.edges(data=True))
+    total = sum(confs.values()) or 1
+    extra = sorted(t for t in confs if t not in _CORE_CONFIDENCE_TIERS)
+    lines = []
+    for tier in (*_CORE_CONFIDENCE_TIERS, *extra):
+        n = confs.get(tier, 0)
+        pct = round(n / total * 100)
+        lines.append(f"{sanitize_label(str(tier))}: {n} ({pct}%)" if counts
+                     else f"{sanitize_label(str(tier))}: {pct}%")
+    return "\n".join(lines) + "\n"
+
+
+_IAC_FIELDS = ("iac_lang", "iac_kind", "iac_type", "iac_env", "iac_layer")
+
+
+def _iac_line(d: dict) -> list[str]:
+    """get_node's infrastructure-as-code summary (fork: Bicep/Terraform nodes
+    annotated by the extractors and link_iac); empty for every other node."""
+    parts = [f"{k[4:]}={sanitize_label(str(d[k]))}" for k in _IAC_FIELDS if d.get(k)]
+    return [f"  IaC: {' '.join(parts)}"] if parts else []
+
+
 def _communities_from_graph(G: nx.Graph) -> dict[int, list[str]]:
     """Reconstruct community dict from community property stored on nodes."""
     communities: dict[int, list[str]] = {}
@@ -1966,6 +1997,29 @@ def _build_server(graph_path: str):
                 },
             ),
             types.Tool(
+                name="affected",
+                description=(
+                    "Blast radius: which nodes/files are impacted if the given file or symbol "
+                    "changes (reverse traversal over calls, imports, references, ...). When a "
+                    "co-change layer exists (graphify cochange), files that historically change "
+                    "together are included too, tagged [co_changes_with]. Use before editing to "
+                    "see what else might need to change."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "target": {"type": "string", "description": "File path (repo-relative) or node label/ID"},
+                        "depth": {"type": "integer", "default": 2, "description": "Reverse traversal depth (1-6)"},
+                        "relations": {
+                            "type": "array", "items": {"type": "string"},
+                            "description": "Optional: relations to traverse (replaces the default set)",
+                        },
+                        "token_budget": {"type": "integer", "default": 2000, "description": "Max output tokens"},
+                    },
+                    "required": ["target"],
+                },
+            ),
+            types.Tool(
                 name="list_prs",
                 description=(
                     "List open GitHub PRs with CI status, review state, and graph impact "
@@ -2090,6 +2144,7 @@ def _build_server(graph_path: str):
                f"{sanitize_label(str(d.get('definition_location', '')))}"]
               if d.get("definition_file") else []),
             f"  Type: {sanitize_label(str(d.get('file_type', '')))}",
+            *_iac_line(d),
             f"  Community: {sanitize_label(str(d.get('community_name') or d.get('community', '')))}",
             f"  Degree: {G.degree(nid)}",
             *attrs_line,
@@ -2167,19 +2222,34 @@ def _build_server(graph_path: str):
         return "\n".join(lines)
 
     def _tool_graph_stats(_: dict) -> str:
-        confs = [d.get("confidence", "EXTRACTED") for _, _, d in G.edges(data=True)]
-        total = len(confs) or 1
         return (
             f"Nodes: {G.number_of_nodes()}\n"
             f"Edges: {G.number_of_edges()}\n"
             f"Communities: {len(communities)}\n"
-            f"EXTRACTED: {round(confs.count('EXTRACTED')/total*100)}%\n"
-            f"INFERRED: {round(confs.count('INFERRED')/total*100)}%\n"
-            f"AMBIGUOUS: {round(confs.count('AMBIGUOUS')/total*100)}%\n"
+            + _confidence_breakdown(G, counts=False)
         )
 
     def _tool_shortest_path(arguments: dict) -> str:
         return _shortest_path_text(G, arguments)
+
+    def _tool_affected(arguments: dict) -> str:
+        # Fork addition: the MCP twin of `graphify affected`, co-change aware.
+        from graphify.affected import format_affected
+        from graphify import fork_affected
+        target = str(arguments.get("target") or _node_arg(arguments) or "").strip()
+        if not target:
+            return "Provide a target file path or node label (key: target)."
+        depth = max(1, min(int(arguments.get("depth", 2)), 6))
+        Ga = fork_affected.prepare(G, active_graph_path)
+        relations = arguments.get("relations") or fork_affected.default_relations(Ga)
+        gp = Path(active_graph_path)
+        root = gp.parent.parent if gp.parent.name == _paths.GRAPHIFY_OUT_NAME else gp.parent
+        text = format_affected(Ga, target, relations=tuple(relations), depth=depth, root=root)
+        lines = [_CONTROL_CHAR_RE.sub("", line) for line in text.splitlines()]
+        budget = int(arguments.get("token_budget", 2000))
+        return _cut_lines_to_budget(
+            lines, budget, "Lower depth or pass relations to narrow the traversal"
+        )
 
     def _tool_list_prs(arguments: dict) -> str:
         from graphify.prs import fetch_prs, fetch_worktrees, format_prs_text, _detect_default_branch
@@ -2274,6 +2344,7 @@ def _build_server(graph_path: str):
         "god_nodes": _tool_god_nodes,
         "graph_stats": _tool_graph_stats,
         "shortest_path": _tool_shortest_path,
+        "affected": _tool_affected,
         "list_prs": _tool_list_prs,
         "get_pr_impact": _tool_get_pr_impact,
         "triage_prs": _tool_triage_prs,
@@ -2325,14 +2396,8 @@ def _build_server(graph_path: str):
             except Exception as exc:
                 return f"Could not compute surprising connections: {exc}"
         if uri_str == "graphify://audit":
-            confs = [d.get("confidence", "EXTRACTED") for _, _, d in G.edges(data=True)]
-            total = len(confs) or 1
-            return (
-                f"Total edges: {total}\n"
-                f"EXTRACTED: {confs.count('EXTRACTED')} ({round(confs.count('EXTRACTED')/total*100)}%)\n"
-                f"INFERRED: {confs.count('INFERRED')} ({round(confs.count('INFERRED')/total*100)}%)\n"
-                f"AMBIGUOUS: {confs.count('AMBIGUOUS')} ({round(confs.count('AMBIGUOUS')/total*100)}%)\n"
-            )
+            # `or 1` keeps the historical "Total edges: 1" for an empty graph.
+            return f"Total edges: {G.number_of_edges() or 1}\n" + _confidence_breakdown(G, counts=True)
         if uri_str == "graphify://questions":
             try:
                 from graphify.analyze import suggest_questions

@@ -74,11 +74,13 @@ def _write(root: Path, rel: str, body: str) -> Path:
 
 @pytest.fixture()
 def graph(tmp_path):
+    # app/ first, as a sorted directory walk yields it: app nodes then precede
+    # the IaC nodes, which is the order that exposes lost edge direction.
     files = [
+        _write(tmp_path, "app/client.py", APP_PY),
         _write(tmp_path, "infra/main.bicep", MAIN_BICEP),
         _write(tmp_path, "infra/modules/storage.bicep", STORAGE_BICEP),
         _write(tmp_path, "tf/main.tf", MAIN_TF),
-        _write(tmp_path, "app/client.py", APP_PY),
     ]
     # Per-test cache (like the CLI's per-project graphify-out/): the default
     # cache_root is CWD, which would share entries across tests' temp roots.
@@ -149,3 +151,54 @@ def test_terraform_output_linked_to_app_consumer(graph):
         if e.get("relation") == "consumed_by" and out in (u, v)
     ]
     assert any(n.get("source_file", "").endswith("client.py") for n in linked)
+
+
+def test_link_iac_edges_keep_direction_in_graph_json(graph, tmp_path):
+    # build_from_json graphs are undirected; link_iac edges must carry
+    # _src/_tgt so to_json writes output -> app and instance -> hub.
+    import json
+    from graphify.export import to_json
+    out = tmp_path / "graph.json"
+    to_json(graph, {}, str(out), force=True)
+    data = json.loads(out.read_text(encoding="utf-8"))
+    labels = {n["id"]: n.get("label") for n in data["nodes"]}
+    by_rel = {}
+    for e in data["links"]:
+        by_rel.setdefault(e["relation"], []).append((labels[e["source"]], labels[e["target"]]))
+    assert ("output.worker_address", "worker_address()") in by_rel["consumed_by"]
+    assert all(t == "aws_instance" for s, t in by_rel["instance_of"] if s.startswith("aws_instance."))
+
+
+def test_affected_file_seed_resolves_to_the_iac_file_node(graph):
+    # A block declared on line 1 must not win over the file node itself when
+    # `affected` is given a Bicep / Terraform file path.
+    from graphify.affected import resolve_seed
+    for path, label in (("infra/modules/storage.bicep", "storage.bicep"),
+                        ("tf/main.tf", "main.tf")):
+        seed = resolve_seed(graph, path)
+        assert graph.nodes[seed]["label"] == label, (path, graph.nodes[seed])
+
+
+def test_affected_on_a_bicep_module_reaches_the_modules_deploying_it(graph, tmp_path):
+    # Through the real path: graph.json on disk, loaded directed as the CLI and
+    # the MCP server do, so stored edge direction is what gets traversed.
+    from graphify import fork_affected
+    from graphify.affected import affected_nodes, load_graph, resolve_seed
+    from graphify.export import to_json
+    out = tmp_path / "graph.json"
+    to_json(graph, {}, str(out), force=True)
+    G = load_graph(out)
+    seed = resolve_seed(G, "infra/modules/storage.bicep")
+    hits = {G.nodes[h.node_id]["label"]: h.via_relation
+            for h in affected_nodes(G, seed, relations=fork_affected.default_relations(G))}
+    assert hits.get("module storage") == "deploys"
+    assert "output storageEndpoint" in hits  # references the deploying module
+
+
+def test_default_relations_unchanged_for_non_iac_graphs():
+    import networkx as nx
+    from graphify import fork_affected
+    from graphify.affected import DEFAULT_AFFECTED_RELATIONS
+    G = nx.DiGraph()
+    G.add_node("a", label="a.py", source_file="a.py", source_location="L1")
+    assert fork_affected.default_relations(G) == tuple(DEFAULT_AFFECTED_RELATIONS)

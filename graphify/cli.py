@@ -1325,7 +1325,7 @@ def dispatch_command(cmd: str) -> None:
             print("Usage: graphify affected \"<node-or-label>\" [--relation R] [--depth N] [--graph path]", file=sys.stderr)
             sys.exit(1)
         from graphify.affected import DEFAULT_AFFECTED_RELATIONS, format_affected, load_graph
-        from graphify.cochange import affected_relations as _cochange_affected_relations
+        from graphify import fork_affected as _fork_affected
         query = sys.argv[2]
         graph_path = _default_graph_path()
         depth = 2
@@ -1378,13 +1378,16 @@ def dispatch_command(cmd: str) -> None:
         # (#2706). The graph is written to <root>/<GRAPHIFY_OUT_NAME>/graph.json,
         # so the root is the output dir's parent; a graph pointed at directly by
         # --graph falls back to its own directory.
+        # Fork: blast radius includes co-change partners from a sibling
+        # cochange.graphify.json (written by `graphify cochange`), if present.
+        graph = _fork_affected.prepare(graph, gp)
         from graphify.paths import GRAPHIFY_OUT_NAME
         graph_root = gp.parent.parent if gp.parent.name == GRAPHIFY_OUT_NAME else gp.parent
         print(
             format_affected(
                 graph,
                 query,
-                relations=relations or _cochange_affected_relations(graph, DEFAULT_AFFECTED_RELATIONS),
+                relations=relations or _fork_affected.default_relations(graph),
                 depth=depth,
                 root=graph_root,
             )

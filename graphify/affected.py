@@ -112,10 +112,13 @@ def _prefer_file_node(
 ) -> str | None:
     """Return the file-level node when a source_file query matches many nodes."""
     query_basename = _normalize_label(Path(query).name)
+    # Fork: some extractors (e.g. Terraform's terraform_file) leave a file node's
+    # location empty; a file-name label still identifies it, and without this a
+    # block declared on line 1 won the L1 fallback below instead of the file.
     exact_file_nodes = [
         node_id
         for node_id in node_ids
-        if str(graph.nodes[node_id].get("source_location", "")) == "L1"
+        if str(graph.nodes[node_id].get("source_location") or "L1") == "L1"
         and _normalize_label(str(graph.nodes[node_id].get("label", ""))) == query_basename
     ]
     if len(exact_file_nodes) == 1:

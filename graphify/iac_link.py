@@ -33,7 +33,7 @@ import networkx as nx
 
 from .ids import make_id
 
-__all__ = ["link_iac"]
+__all__ = ["link_iac", "affected_relations", "IAC_AFFECTED_RELATIONS"]
 
 # iac_kind marker for the synthetic type-hub nodes this pass creates, so a second
 # run does not treat a hub as an instance of its own type.
@@ -155,6 +155,30 @@ def _annotate_terraform(G: nx.Graph) -> None:
             data.update(ann)
 
 
+def _direction(src: str, tgt: str) -> dict:
+    # build_from_json graphs are usually undirected, which loses edge
+    # orientation; graphify records it in _src/_tgt and the exporters restore
+    # it from them. Without these, an edge is written in adjacency order, e.g.
+    # `app_symbol --consumed_by--> output` instead of output -> app_symbol.
+    return {"_src": src, "_tgt": tgt}
+
+
+# Relations a blast-radius walk (`graphify affected`, reverse traversal) should
+# follow on IaC graphs, all pointing dependent -> dependency so a change to the
+# target reaches the source: a module call deploys the file it instantiates
+# (Bicep `deploys`, upstream Terraform `module_source`), and a declaration
+# depends on / nests under another. `consumed_by` (output -> app code) points
+# the other way, so it is deliberately left out.
+IAC_AFFECTED_RELATIONS = ("deploys", "module_source", "depends_on", "parent")
+
+
+def affected_relations(G: nx.Graph, defaults: tuple[str, ...]) -> tuple[str, ...]:
+    """*defaults* plus the IaC relations when *G* holds IaC nodes."""
+    if not any(d.get("iac_lang") for _, d in G.nodes(data=True)):
+        return defaults
+    return (*defaults, *(r for r in IAC_AFFECTED_RELATIONS if r not in defaults))
+
+
 def _disabled() -> bool:
     return os.environ.get("GRAPHIFY_NO_IAC_LINK", "").strip().lower() in ("1", "true", "yes")
 
@@ -208,6 +232,7 @@ def _link_app_consumers(G: nx.Graph, iac_node_ids: set[str]) -> None:
                     out_nid, app_nid, relation="consumed_by", confidence="INFERRED",
                     confidence_score=_APP_LINK_CONFIDENCE, weight=1.0,
                     source_file=G.nodes[app_nid].get("source_file"),
+                    **_direction(out_nid, app_nid),
                 )
 
 
@@ -269,6 +294,7 @@ def link_iac(G: nx.Graph) -> nx.Graph:
                 G.add_edge(
                     nid, hub_id, relation="instance_of", confidence="EXTRACTED",
                     weight=1.0, source_file=G.nodes[nid].get("source_file"),
+                    **_direction(nid, hub_id),
                 )
 
     # 3. infra <-> app linking: outputs consumed by same-named app symbols.

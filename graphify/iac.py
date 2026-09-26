@@ -51,9 +51,11 @@ class IaCGraphBuilder:
         self.lang = lang
         self.scope = scope
         self.file_nid = make_id(self.str_path)
+        # source_location "L1" is graphify's file-node convention: seed
+        # resolution (affected), legacy-id checks and graphmine key on it.
         self.nodes: list[dict] = [{
             "id": self.file_nid, "label": path.name, "file_type": "code",
-            "source_file": self.str_path, "source_location": None,
+            "source_file": self.str_path, "source_location": "L1",
         }]
         self.edges: list[dict] = []
         self._seen_ids: set[str] = {self.file_nid}

@@ -84,9 +84,9 @@ The `bicep` extra exists only in this fork — `graphifyy` on PyPI is upstream a
 has no Bicep support — so install from this repository:
 
 ```bash
-uv tool install "graphifyy[bicep,terraform] @ git+https://github.com/PaavoReinikka/graphify@v8"
+uv tool install "graphifyy[bicep,terraform,mcp] @ git+https://github.com/PaavoReinikka/graphify@v8"
 # or from a local clone:
-uv tool install ".[bicep,terraform]"
+uv tool install ".[bicep,terraform,mcp]"
 ```
 
 ### Added
@@ -168,12 +168,14 @@ Fisher p-value); `graph.json` is left untouched. graphify only owns `[repo]`,
 …) is forwarded to `graphmine cochange` unchanged — see `graphmine cochange --help`.
 If graphmine isn't on PATH the command prints an install hint and exits.
 
-Point `graphify affected` at the augmented graph to get a blast radius that
-includes co-change partners — they are followed in both directions and tagged
-`[co_changes_with]`, next to the structural hits:
+Blast radius then includes co-change partners automatically: `graphify affected`
+and the MCP server's `affected` tool pick up the `cochange.graphify.json` next to
+`graph.json`, follow co-change edges in both directions, and tag those hits
+`[co_changes_with]` next to the structural ones. Other tools and the plain graph
+are unchanged.
 
 ```bash
-graphify affected src/app/client.py --graph graphify-out/cochange.graphify.json
+graphify affected src/app/client.py
 ```
 
 Add `--update-instructions` to also teach your assistant about the layer: it
@@ -635,7 +637,7 @@ python -m graphify.serve graphify-out/graph.json --transport http --port 8080
 python -m graphify.serve graphify-out/graph.json --transport http --host 0.0.0.0 --api-key "$SECRET"
 ```
 
-The MCP server gives your assistant structured access: `query_graph`, `get_node`, `get_neighbors`, `shortest_path`, `list_prs`, `get_pr_impact`, `triage_prs`.
+The MCP server gives your assistant structured access: `query_graph`, `get_node`, `get_neighbors`, `shortest_path`, `affected` (this fork), `list_prs`, `get_pr_impact`, `triage_prs`.
 
 ### Shared HTTP server
 
