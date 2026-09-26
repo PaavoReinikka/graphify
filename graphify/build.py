@@ -1521,6 +1521,12 @@ def build_from_json(extraction: dict, *, directed: bool = False, root: str | Pat
                 f"will be emptied on the next export.",
                 file=sys.stderr,
             )
+    # Fork addition — second build step: enrich infrastructure-as-code graphs
+    # with cross-cutting structure (resource-type hubs, env/layer scoping,
+    # IaC-output -> app-code links). No-op on non-IaC graphs and idempotent, so
+    # every build_from_json caller (skill, CLI, merge) gets it for free.
+    from .iac_link import link_iac
+    link_iac(G)
     # Runs LAST, after the alias-competition above (which relies on file-node
     # labels still being bare basenames): give colliding-basename file nodes a
     # directory-qualified display label so lookup/discovery can disambiguate
