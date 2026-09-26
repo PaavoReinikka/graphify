@@ -68,6 +68,127 @@ graphify-out/
 
 ---
 
+## In this fork
+
+This fork (`PaavoReinikka/graphify`) extends upstream with first-class
+**infrastructure-as-code** support — built primarily for Azure Bicep monorepos
+(complex module hierarchies, dev/prod environments, app vs core/common layers)
+alongside the application code that consumes the infrastructure. The fork is
+kept rebased on upstream `v8`; fork-only code lives in its own files
+(`graphify/extractors/bicep.py`, `graphify/iac.py`, `graphify/iac_link.py`,
+`graphify/cochange.py`) with small hooks into upstream modules.
+
+### Install
+
+The `bicep` extra exists only in this fork — `graphifyy` on PyPI is upstream and
+has no Bicep support — so install from this repository:
+
+```bash
+uv tool install "graphifyy[bicep,terraform] @ git+https://github.com/PaavoReinikka/graphify@v8"
+# or from a local clone:
+uv tool install ".[bicep,terraform]"
+```
+
+### Added
+
+- **Azure Bicep extraction** (`.bicep`, `.bicepparam`) — local tree-sitter AST,
+  no API calls. Resources, modules, params, vars, and outputs become nodes;
+  `references` (incl. nested-object and `member`-expression refs and string
+  interpolation), `depends_on` (from `dependsOn` arrays), `parent` (resource
+  nesting), and `deploys` (module → the `.bicep` file it deploys, resolved
+  across directories) become edges. `existing` resources are flagged; loop
+  variables and built-ins are never emitted as false references. Parameter
+  values are never stored, and `.bicepparam` files whose name or folder
+  suggests secrets are skipped, like upstream does for `.tfvars`.
+- **Shared IaC vocabulary** — every Bicep and Terraform node carries
+  `iac_lang` / `iac_kind` / `iac_type` / `iac_name`, so both languages are
+  reasoned about uniformly. Bicep sets them in its extractor
+  (`IaCGraphBuilder`, `graphify/iac.py`); Terraform uses upstream's extractor
+  unchanged and `link_iac` derives the annotations from each block's address.
+- **Two-step build** (`graphify/iac_link.py::link_iac`) — a post-merge
+  enrichment pass run inside `build_from_json`, so the skill, CLI, and merge
+  paths all get it. It is a no-op on non-IaC graphs, idempotent, and opt-out via
+  `GRAPHIFY_NO_IAC_LINK=1`. It adds:
+  - **resource-type hub nodes** — one concept node per resource type with 2+
+    instances (a god-node for "everything that touches Storage / Key Vault"),
+    shared across Bicep and Terraform;
+  - **monorepo scoping** — `iac_env` (dev/test/staging/prod/…) and `iac_layer`
+    (module / core / app) derived from file paths, so dev vs prod and reusable
+    modules vs app stacks stay distinguishable in queries and clustering;
+  - **infra↔app linking** — `INFERRED` `consumed_by` edges from a Bicep/Terraform
+    `output` to the application-code symbol that shares its name (exact
+    normalized match, length floor, stoplist, uniqueness — high precision).
+- **Co-change enrichment** (optional) — `graphify cochange` augments a built
+  graph with statistically-significant **`co_changes_with`** edges mined from
+  git history by the standalone [graphmine](https://github.com/PaavoReinikka/graphmine)
+  tool (see below).
+
+### Recommended usage (no API key, Claude Code as the LLM endpoint)
+
+Code and infrastructure are extracted locally (tree-sitter AST) and need **no
+LLM at all**. For the parts that do need a model — docs, PDFs, images,
+transcripts — this fork is meant to run with **Claude Code as the synthetic LLM
+endpoint via your subscription**, with no API key:
+
+```bash
+# code/IaC only — fully offline, no key, no backend flag needed:
+graphify extract ./infra
+
+# whole repo (code + docs/images) using the Claude Code CLI as the model:
+graphify extract . --backend claude-cli
+```
+
+`--backend claude-cli` routes semantic extraction through the local `claude`
+binary (Claude Code), so it uses your Claude subscription instead of an
+`ANTHROPIC_API_KEY`. Inside the `/graphify` skill the IDE session already
+provides the model, so no key is needed there either.
+
+### Co-change enrichment with graphmine (optional)
+
+[graphmine](https://github.com/PaavoReinikka/graphmine) mines statistically
+significant **co-change** couplings from git history — files that evolve together
+far more than chance (generated-together files, dev↔prod params, a SQL table and
+its triggers) — which static structure can't see. It is a standalone tool
+powered by [Kingfisher](https://github.com/PaavoReinikka/kingfisher-bnb) (the
+`kingfisher-bnb` wheel on PyPI, prebuilt — no Rust toolchain needed);
+`graphify cochange` shells out to it, so there is no hard dependency.
+
+```bash
+uv tool install git+https://github.com/PaavoReinikka/graphmine   # once
+graphify extract . --backend claude-cli    # build graphify-out/graph.json
+graphify cochange .                        # add co_changes_with edges
+```
+
+This writes `graphify-out/cochange.md` (a clustered digest) and
+`graphify-out/cochange.graphify.json` (a copy of the graph **plus** additive
+`co_changes_with` edges — a `STATISTICAL` confidence tier carrying the raw
+Fisher p-value); `graph.json` is left untouched. graphify only owns `[repo]`,
+`--graph` and `--update-instructions`; every other flag (`--alpha`,
+`--subsystem-depth`, `--significance tarone`, `--exclude`, `--include-deleted`,
+…) is forwarded to `graphmine cochange` unchanged — see `graphmine cochange --help`.
+If graphmine isn't on PATH the command prints an install hint and exits.
+
+Add `--update-instructions` to also teach your assistant about the layer: it
+appends a `## graphify: co-change` section (telling the model to use the
+co-change layer for impact / refactoring questions) to every graphify-configured
+instruction file (`CLAUDE.md`, `AGENTS.md`, …). It's **opt-in**, idempotent, and
+only touches files that already have graphify's `## graphify` block:
+
+```bash
+graphify cochange . --update-instructions
+```
+
+### Planned / deferred
+
+- **Embeddings / hybrid retrieval** — optional embedding-backed query that blends
+  cosine similarity with the existing lexical TF-IDF, for natural-language
+  questions whose words don't appear in node labels (opt-in; keeps the offline
+  default). Tabled for now.
+- **Broader IaC coverage** — ARM templates, Kubernetes manifests, and Pulumi via
+  the same shared vocabulary.
+
+---
+
 ## See it in action
 
 <p align="center">
@@ -268,6 +389,7 @@ Codex users also need `multi_agent = true` under `[features]` in `~/.codex/confi
 | `postgres` | Live PostgreSQL introspection (`--postgres DSN`) | `uv tool install "graphifyy[postgres]"` |
 | `dm` | BYOND DreamMaker `.dm`/`.dme` AST extraction (may need a C compiler + `python3-dev` if no wheel matches your platform) | `uv tool install "graphifyy[dm]"` |
 | `terraform` | Terraform / HCL `.tf`/`.tfvars`/`.hcl` AST extraction | `uv tool install "graphifyy[terraform]"` |
+| `bicep` | Azure Bicep `.bicep`/`.bicepparam` AST extraction (**this fork only** — see [In this fork](#in-this-fork)) | `uv tool install ".[bicep]"` |
 | `pascal` | Pascal / Delphi `.pas`/`.dpr`/`.dpk`/`.inc` AST extraction (more accurate `calls`/`inherits` edges; falls back to a regex extractor when absent) | `uv tool install "graphifyy[pascal]"` |
 | `ocaml` | OCaml `.ml`/`.mli` AST extraction | `uv tool install "graphifyy[ocaml]"` |
 | `commonlisp` | Common Lisp `.lisp`/`.cl`/`.lsp`/`.asd` AST extraction | `uv tool install "graphifyy[commonlisp]"` |
@@ -344,6 +466,7 @@ To remove graphify from all platforms at once: `graphify uninstall` (add `--purg
 | Code (37 tree-sitter grammars) | `.py .ts .mts .cts .js .jsx .tsx .mjs .go .rs .java .c .cpp .cc .cxx .h .hpp .cu .cuh .metal .rb .cs .kt .kts .scala .php .swift .lua .luau .toc .zig .ps1 .psm1 .psd1 .ex .exs .m .mm .ml .mli .jl .vue .svelte .astro .groovy .gradle .dart .v .sv .svh .sql .f .f90 .f95 .f03 .f08 .pas .pp .dpr .dpk .lpr .inc .dfm .lfm .lpk .sh .bash .json .dm .dme .dmi .dmm .dmf .sln .slnx .csproj .fsproj .vbproj .xaml .razor .cshtml` (`.dm`/`.dme` requires `uv tool install graphifyy[dm]`, `.ml`/`.mli` requires `uv tool install graphifyy[ocaml]`; `.mts`/`.cts` reuse the TypeScript grammar, `.cc`/`.cxx` and CUDA `.cu`/`.cuh` and Metal `.metal` reuse the C++ grammar) |
 | Salesforce Apex | `.cls .trigger` (regex-based; classes, interfaces, enums, methods, triggers, SOQL/DML edges) |
 | Terraform / HCL | `.tf .tfvars .hcl` (requires `uv tool install graphifyy[terraform]`) |
+| Azure Bicep | `.bicep .bicepparam` (resources, modules, params, vars, outputs; `references`/`depends_on`/`parent`/`deploys` edges; requires the fork's `bicep` extra) |
 | OCaml | `.ml .mli` (requires `uv tool install graphifyy[ocaml]`) |
 | Common Lisp | `.lisp .cl .lsp .asd` (requires `uv tool install graphifyy[commonlisp]`) |
 | Robot Framework | `.robot .resource` (via the official `robot.api` parser, requires `uv tool install graphifyy[robot]`; suites, test cases, user keywords, keyword-call and Resource/Library/Variables import edges) |
