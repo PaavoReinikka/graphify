@@ -187,6 +187,9 @@ graphify cochange . --update-instructions
 - **Broader IaC coverage** — ARM templates, Kubernetes manifests, and Pulumi via
   the same shared vocabulary.
 
+Known issues found while porting are tracked in
+[docs/fork-known-issues.md](docs/fork-known-issues.md).
+
 ---
 
 ## See it in action
