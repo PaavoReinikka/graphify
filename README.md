@@ -168,6 +168,14 @@ Fisher p-value); `graph.json` is left untouched. graphify only owns `[repo]`,
 …) is forwarded to `graphmine cochange` unchanged — see `graphmine cochange --help`.
 If graphmine isn't on PATH the command prints an install hint and exits.
 
+Point `graphify affected` at the augmented graph to get a blast radius that
+includes co-change partners — they are followed in both directions and tagged
+`[co_changes_with]`, next to the structural hits:
+
+```bash
+graphify affected src/app/client.py --graph graphify-out/cochange.graphify.json
+```
+
 Add `--update-instructions` to also teach your assistant about the layer: it
 appends a `## graphify: co-change` section (telling the model to use the
 co-change layer for impact / refactoring questions) to every graphify-configured

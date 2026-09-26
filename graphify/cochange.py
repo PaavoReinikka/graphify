@@ -25,6 +25,7 @@ from pathlib import Path
 # base `## graphify` block (idempotent update, removable, never rewrites the base
 # block). Kept inline (not an always_on/ file) so it stays out of skillgen's
 # always-on-roundtrip validation — this is a fork-local addition.
+COCHANGE_RELATION = "co_changes_with"
 _COCHANGE_MARKER = "## graphify: co-change"
 _COCHANGE_INSTRUCTION = """\
 ## graphify: co-change
@@ -41,6 +42,8 @@ Rules:
   a SQL table and its triggers.
 - When editing or assessing a file, check its co-change partners in
   `graphify-out/cochange.md` and weigh them in "what else might need to change".
+- `graphify affected <file> --graph graphify-out/cochange.graphify.json` gives a
+  blast radius that includes co-change partners (hits tagged `[co_changes_with]`).
 - These edges are statistical hints, not guarantees — weight them by the p-value.
 """
 
@@ -111,6 +114,17 @@ _USAGE = """Usage: graphify cochange [repo] [--graph PATH] [--update-instruction
   --subsystem-depth, --significance tarone, --min-freq, --exclude,
   --include-deleted); see `graphmine cochange --help`. Give [repo] before
   any forwarded flags."""
+
+
+def affected_relations(graph, defaults: tuple[str, ...]) -> tuple[str, ...]:
+    """Default relation set for ``graphify affected``: *defaults*, plus
+    ``co_changes_with`` when *graph* carries co-change edges (a
+    ``cochange.graphify.json``), so blast radius includes files that change
+    together. A plain graph.json is unaffected. Hits stay labelled
+    ``[co_changes_with]``, and an explicit ``--relation`` still replaces the set."""
+    if any(d.get("relation") == COCHANGE_RELATION for _, _, d in graph.edges(data=True)):
+        return (*defaults, COCHANGE_RELATION)
+    return defaults
 
 
 def run_cli(argv: list[str]) -> None:

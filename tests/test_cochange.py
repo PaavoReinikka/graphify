@@ -124,3 +124,34 @@ def test_graphmine_available_reflects_path():
         assert cochange.graphmine_available() is False
     with patch("graphify.cochange.shutil.which", return_value="/x/graphmine"):
         assert cochange.graphmine_available() is True
+
+
+def _cochange_graph():
+    import networkx as nx
+    G = nx.DiGraph()
+    for nid, sf in (("a", "src/a.py"), ("b", "src/b.py"), ("c", "src/c.py")):
+        G.add_node(nid, label=sf.rsplit("/", 1)[-1], source_file=sf, source_location="L1")
+    G.add_edge("b", "a", relation="imports", source_file="src/b.py", source_location="L1")
+    # stored once, pointing AWAY from the seed: must still be followed from "a"
+    G.add_edge("a", "c", relation="co_changes_with", confidence="STATISTICAL")
+    return G
+
+
+def test_affected_relations_adds_cochange_only_when_present():
+    from graphify.affected import DEFAULT_AFFECTED_RELATIONS
+    import networkx as nx
+    assert cochange.affected_relations(nx.DiGraph(), DEFAULT_AFFECTED_RELATIONS) == DEFAULT_AFFECTED_RELATIONS
+    rels = cochange.affected_relations(_cochange_graph(), DEFAULT_AFFECTED_RELATIONS)
+    assert rels == (*DEFAULT_AFFECTED_RELATIONS, "co_changes_with")
+
+
+def test_affected_follows_cochange_in_both_directions():
+    from graphify.affected import DEFAULT_AFFECTED_RELATIONS, affected_nodes
+    G = _cochange_graph()
+    rels = cochange.affected_relations(G, DEFAULT_AFFECTED_RELATIONS)
+    hits = {h.node_id: h.via_relation for h in affected_nodes(G, "a", relations=rels)}
+    assert hits == {"b": "imports", "c": "co_changes_with"}
+    back = {h.node_id: h.via_relation for h in affected_nodes(G, "c", relations=rels)}
+    assert back["a"] == "co_changes_with" and back["b"] == "imports"
+    # structural-only walk is unchanged
+    assert {h.node_id for h in affected_nodes(G, "a")} == {"b"}

@@ -1325,6 +1325,7 @@ def dispatch_command(cmd: str) -> None:
             print("Usage: graphify affected \"<node-or-label>\" [--relation R] [--depth N] [--graph path]", file=sys.stderr)
             sys.exit(1)
         from graphify.affected import DEFAULT_AFFECTED_RELATIONS, format_affected, load_graph
+        from graphify.cochange import affected_relations as _cochange_affected_relations
         query = sys.argv[2]
         graph_path = _default_graph_path()
         depth = 2
@@ -1383,7 +1384,7 @@ def dispatch_command(cmd: str) -> None:
             format_affected(
                 graph,
                 query,
-                relations=relations or DEFAULT_AFFECTED_RELATIONS,
+                relations=relations or _cochange_affected_relations(graph, DEFAULT_AFFECTED_RELATIONS),
                 depth=depth,
                 root=graph_root,
             )
