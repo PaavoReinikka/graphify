@@ -4804,6 +4804,11 @@ def dispatch_command(cmd: str) -> None:
             f"{merged['input_tokens']:,} in / {merged['output_tokens']:,} out tokens"
         )
 
+    elif cmd == "cochange":
+        # Fork addition: optional co-change layer via the standalone graphmine tool.
+        from graphify.cochange import run_cli as _cochange_cli
+        _cochange_cli(sys.argv[2:])
+
     elif cmd == "merge-semantic":
         # graphify merge-semantic --cached <path> --new <path> --out <path>
         # Merges cached semantic results with freshly-extracted chunk results.
