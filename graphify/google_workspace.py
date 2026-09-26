@@ -112,6 +112,7 @@ def _run_gws_export(file_id: str, mime_type: str, output: Path, resource_key: st
         capture_output=True,
         cwd=output.parent,
         text=True,
+        encoding="utf-8",  # gws output (doc titles) is UTF-8; avoid cp1252 on Windows
         timeout=timeout,
     )
     if result.returncode != 0:

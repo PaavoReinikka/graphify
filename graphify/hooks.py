@@ -597,7 +597,9 @@ def _hooks_dir(root: Path) -> Path:
     try:
         res = _sp.run(
             ["git", "-C", str(root), "rev-parse", "--git-path", "hooks"],
-            capture_output=True, text=True,
+            # git prints paths as UTF-8; the cp1252 default on Windows would
+            # mangle non-ASCII directory names (e.g. Työpöytä) into a wrong path.
+            capture_output=True, text=True, encoding="utf-8",
         )
         if res.returncode != 0:
             # git failing here is a real signal (corrupt .git/config, tampering,
