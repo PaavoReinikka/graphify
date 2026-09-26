@@ -686,7 +686,6 @@ def _run_cli() -> None:
         print("    --half-life-days N      signal weight halves every N days (default 30)")
         print("    --min-corroboration N   distinct useful results to prefer a node (default 2)")
         print("  check-update <path>     check needs_update flag and notify if semantic re-extraction is pending (cron-safe)")
-        print("  cochange [repo]         add co_changes_with edges from git history (needs 'graphmine')")
         print("  tree                    emit a D3 v7 collapsible-tree HTML for graph.json")
         print("    --graph PATH            path to graph.json (default graphify-out/graph.json)")
         print("    --output HTML           output path (default graphify-out/GRAPH_TREE.html)")
@@ -816,8 +815,7 @@ def _run_cli() -> None:
     # (e.g. "cursor install --help" was silently installing into Cursor, #821).
     # Exempt: free-text commands (user string may contain these tokens), and
     # "install"/"uninstall" which have their own per-subcommand help handlers.
-    # "cochange" (fork) prints its own usage and never acts on --help.
-    _FREE_TEXT_CMDS = {"query", "explain", "path", "save-result", "install", "uninstall", "cochange"}
+    _FREE_TEXT_CMDS = {"query", "explain", "path", "save-result", "install", "uninstall"}
     if cmd not in _FREE_TEXT_CMDS and any(a in {"-h", "--help", "-?"} for a in sys.argv[2:]):
         print(f"Run 'graphify --help' for full usage.")
         return

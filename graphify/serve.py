@@ -96,9 +96,9 @@ _CORE_CONFIDENCE_TIERS = ("EXTRACTED", "INFERRED", "AMBIGUOUS")
 
 def _confidence_breakdown(G: nx.Graph, *, counts: bool) -> str:
     """Per-tier edge confidence lines. The three core tiers always print (the
-    historical format); any other tier present — e.g. graphmine's STATISTICAL
-    co-change edges — gets its own line instead of silently vanishing from the
-    percentages. Fork addition."""
+    historical format); any other tier present — e.g. STATISTICAL edges added
+    by an external tool such as graphmine — gets its own line instead of
+    silently vanishing from the percentages. Fork addition."""
     from collections import Counter
     confs = Counter(d.get("confidence", "EXTRACTED") for _, _, d in G.edges(data=True))
     total = sum(confs.values()) or 1
@@ -2000,10 +2000,9 @@ def _build_server(graph_path: str):
                 name="affected",
                 description=(
                     "Blast radius: which nodes/files are impacted if the given file or symbol "
-                    "changes (reverse traversal over calls, imports, references, ...). When a "
-                    "co-change layer exists (graphify cochange), files that historically change "
-                    "together are included too, tagged [co_changes_with]. Use before editing to "
-                    "see what else might need to change."
+                    "changes (reverse traversal over calls, imports, references, ...; on "
+                    "infrastructure-as-code also module deploys and dependsOn). Use before "
+                    "editing to see what else might need to change."
                 ),
                 inputSchema={
                     "type": "object",
@@ -2233,18 +2232,17 @@ def _build_server(graph_path: str):
         return _shortest_path_text(G, arguments)
 
     def _tool_affected(arguments: dict) -> str:
-        # Fork addition: the MCP twin of `graphify affected`, co-change aware.
+        # Fork addition: the MCP twin of `graphify affected`.
         from graphify.affected import format_affected
         from graphify import fork_affected
         target = str(arguments.get("target") or _node_arg(arguments) or "").strip()
         if not target:
             return "Provide a target file path or node label (key: target)."
         depth = max(1, min(int(arguments.get("depth", 2)), 6))
-        Ga = fork_affected.prepare(G, active_graph_path)
-        relations = arguments.get("relations") or fork_affected.default_relations(Ga)
+        relations = arguments.get("relations") or fork_affected.default_relations(G)
         gp = Path(active_graph_path)
         root = gp.parent.parent if gp.parent.name == _paths.GRAPHIFY_OUT_NAME else gp.parent
-        text = format_affected(Ga, target, relations=tuple(relations), depth=depth, root=root)
+        text = format_affected(G, target, relations=tuple(relations), depth=depth, root=root)
         lines = [_CONTROL_CHAR_RE.sub("", line) for line in text.splitlines()]
         budget = int(arguments.get("token_budget", 2000))
         return _cut_lines_to_budget(

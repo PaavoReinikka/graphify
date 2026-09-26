@@ -1378,9 +1378,6 @@ def dispatch_command(cmd: str) -> None:
         # (#2706). The graph is written to <root>/<GRAPHIFY_OUT_NAME>/graph.json,
         # so the root is the output dir's parent; a graph pointed at directly by
         # --graph falls back to its own directory.
-        # Fork: blast radius includes co-change partners from a sibling
-        # cochange.graphify.json (written by `graphify cochange`), if present.
-        graph = _fork_affected.prepare(graph, gp)
         from graphify.paths import GRAPHIFY_OUT_NAME
         graph_root = gp.parent.parent if gp.parent.name == GRAPHIFY_OUT_NAME else gp.parent
         print(
@@ -4807,11 +4804,6 @@ def dispatch_command(cmd: str) -> None:
             f"Merged {chunk_summary}: {len(merged['nodes'])} nodes, {len(merged['edges'])} edges, "
             f"{merged['input_tokens']:,} in / {merged['output_tokens']:,} out tokens"
         )
-
-    elif cmd == "cochange":
-        # Fork addition: optional co-change layer via the standalone graphmine tool.
-        from graphify.cochange import run_cli as _cochange_cli
-        _cochange_cli(sys.argv[2:])
 
     elif cmd == "merge-semantic":
         # graphify merge-semantic --cached <path> --new <path> --out <path>

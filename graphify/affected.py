@@ -31,11 +31,6 @@ DEFAULT_AFFECTED_RELATIONS = (
     "requires",
 )
 
-# Fork addition: relations with no direction. graphmine's `co_changes_with`
-# (git co-change coupling) is stored once per file pair in arbitrary
-# orientation, so the reverse walk must follow it from either endpoint.
-SYMMETRIC_AFFECTED_RELATIONS = frozenset({"co_changes_with"})
-
 
 @dataclass(frozen=True)
 class AffectedHit:
@@ -240,15 +235,6 @@ def affected_nodes(
                 for source, target, data in graph.edges(data=True)
                 if target == current
             )
-        if relation_set & SYMMETRIC_AFFECTED_RELATIONS:
-            outgoing = (
-                graph.out_edges(current, data=True) if hasattr(graph, "out_edges")
-                else ((s, t, d) for s, t, d in graph.edges(data=True) if s == current)
-            )
-            incoming = [*incoming, *(
-                (target, source, data) for source, target, data in outgoing
-                if str(data.get("relation", "")) in SYMMETRIC_AFFECTED_RELATIONS
-            )]
         for source, _target, data in incoming:
             relation = str(data.get("relation", ""))
             if relation not in relation_set:

@@ -34,7 +34,7 @@ Signatures below are the real ones - `tests/test_architecture_doc.py` imports ev
 | `benchmark.py` | `run_benchmark(graph_path)` | graph file → corpus vs subgraph token comparison |
 | `iac.py` | `IaCGraphBuilder` | *(fork)* shared node/edge bookkeeping for declarative infra-as-code extractors (`extractors/bicep.py`) |
 | `iac_link.py` | `link_iac(G)` | *(fork)* post-merge enrichment of infra graphs, run inside `build_from_json`: Terraform `iac_*` annotation, resource-type hubs, env/layer scoping, output → app-code `consumed_by` links. No-op on non-IaC graphs, idempotent, disabled by `GRAPHIFY_NO_IAC_LINK=1` |
-| `cochange.py` | `enrich_with_cochange(repo, graph_path, out_dir)`, `update_instructions(project_dir)` | *(fork)* git history → co-change layer via the optional external `graphmine` CLI |
+| `fork_affected.py` | `default_relations(G)` | *(fork)* default `affected` relation set: upstream's, plus the IaC dependency relations on IaC graphs |
 
 ### Calling `extract()` from your own code
 

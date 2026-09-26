@@ -1,5 +1,5 @@
-"""MCP server behaviour added by this fork: the `affected` tool (co-change
-aware), the per-tier confidence breakdown, and get_node's IaC summary.
+"""MCP server behaviour added by this fork: the `affected` tool (IaC-aware
+blast radius), the per-tier confidence breakdown, and get_node's IaC summary.
 
 Drives the real server through mcp's in-memory transport, so tool
 registration, argument handling and the text contract are all exercised.
@@ -27,7 +27,7 @@ def _edge(s, t, rel, conf="EXTRACTED", **extra):
     return {"source": s, "target": t, "relation": rel, "confidence": conf, **extra}
 
 
-def _write_graph(out: Path, *, cochange_inline: bool) -> Path:
+def _write_graph(out: Path, *, statistical_edge: bool = False) -> Path:
     nodes = [
         _node("a", "a.py", "src/a.py"),
         _node("b", "b.py", "src/b.py"),
@@ -35,17 +35,17 @@ def _write_graph(out: Path, *, cochange_inline: bool) -> Path:
         _node("sa", "resource sa [Microsoft.Storage/storageAccounts@2023-01-01]",
               "infra/main.bicep", "L3", iac_lang="bicep", iac_kind="resource",
               iac_type="Microsoft.Storage/storageAccounts", iac_env="dev"),
+        _node("mod", "storage.bicep", "infra/modules/storage.bicep", "L1",
+              iac_lang="bicep"),
+        _node("call", "module storage", "infra/main.bicep", "L5",
+              iac_lang="bicep", iac_kind="module"),
     ]
-    links = [_edge("b", "a", "imports")]
-    cc = _edge("a", "c", "co_changes_with", "STATISTICAL", p_raw=0.001)
-    if cochange_inline:
-        links.append(cc)
+    links = [_edge("b", "a", "imports"), _edge("call", "mod", "deploys")]
+    if statistical_edge:  # e.g. a graph augmented by an external tool
+        links.append(_edge("a", "c", "co_changes_with", "STATISTICAL", p_raw=0.001))
     out.mkdir(parents=True, exist_ok=True)
     graph = {"directed": False, "multigraph": False, "graph": {}, "nodes": nodes, "links": links}
     (out / "graph.json").write_text(json.dumps(graph), encoding="utf-8")
-    if not cochange_inline:
-        side = dict(graph, links=[*links, cc])
-        (out / "cochange.graphify.json").write_text(json.dumps(side), encoding="utf-8")
     return out / "graph.json"
 
 
@@ -69,41 +69,34 @@ def _call(graph_path: Path, calls: list[tuple[str, dict]]) -> list[str]:
     return asyncio.run(run())
 
 
-def test_affected_reads_cochange_sidecar_next_to_graph_json(tmp_path):
-    gp = _write_graph(tmp_path / "graphify-out", cochange_inline=False)
+def test_affected_structural_blast_radius(tmp_path):
+    gp = _write_graph(tmp_path / "graphify-out")
     (text,) = _call(gp, [("affected", {"target": "src/a.py"})])
-    assert "b.py [imports]" in text
-    assert "c.py [co_changes_with]" in text
+    assert "b.py [imports]" in text and "c.py" not in text
 
 
-def test_affected_without_cochange_is_structural_only(tmp_path):
-    gp = _write_graph(tmp_path / "graphify-out", cochange_inline=False)
-    (tmp_path / "graphify-out" / "cochange.graphify.json").unlink()
-    (text,) = _call(gp, [("affected", {"target": "src/a.py"})])
-    assert "b.py [imports]" in text and "co_changes_with" not in text
-
-
-def test_affected_follows_inline_cochange_from_either_end(tmp_path):
-    gp = _write_graph(tmp_path / "graphify-out", cochange_inline=True)
-    (text,) = _call(gp, [("affected", {"target": "src/c.py"})])
-    assert "a.py [co_changes_with]" in text
+def test_affected_on_iac_follows_deploys(tmp_path):
+    gp = _write_graph(tmp_path / "graphify-out")
+    (text,) = _call(gp, [("affected", {"target": "infra/modules/storage.bicep"})])
+    assert "Affected nodes for storage.bicep" in text
+    assert "module storage [deploys]" in text
 
 
 def test_stats_and_audit_count_every_confidence_tier(tmp_path):
-    gp = _write_graph(tmp_path / "graphify-out", cochange_inline=True)
+    gp = _write_graph(tmp_path / "graphify-out", statistical_edge=True)
     stats, audit = _call(gp, [("graph_stats", {}), ("graphify://audit", {})])
-    assert "STATISTICAL: 50%" in stats and "EXTRACTED: 50%" in stats
-    assert "STATISTICAL: 1 (50%)" in audit and "Total edges: 2" in audit
+    assert "STATISTICAL: 33%" in stats and "EXTRACTED: 67%" in stats
+    assert "STATISTICAL: 1 (33%)" in audit and "Total edges: 3" in audit
 
 
 def test_stats_format_unchanged_for_core_tiers_only(tmp_path):
-    gp = _write_graph(tmp_path / "graphify-out", cochange_inline=False)
+    gp = _write_graph(tmp_path / "graphify-out")
     (stats,) = _call(gp, [("graph_stats", {})])
     assert stats.splitlines()[-3:] == ["EXTRACTED: 100%", "INFERRED: 0%", "AMBIGUOUS: 0%"]
 
 
 def test_get_node_shows_iac_summary(tmp_path):
-    gp = _write_graph(tmp_path / "graphify-out", cochange_inline=False)
+    gp = _write_graph(tmp_path / "graphify-out")
     iac, plain = _call(gp, [("get_node", {"label": "sa"}), ("get_node", {"label": "a.py"})])
     assert "IaC: lang=bicep kind=resource type=Microsoft.Storage/storageAccounts env=dev" in iac
     assert "IaC:" not in plain

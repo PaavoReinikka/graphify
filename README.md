@@ -76,7 +76,7 @@ This fork (`PaavoReinikka/graphify`) extends upstream with first-class
 alongside the application code that consumes the infrastructure. The fork is
 kept rebased on upstream `v8`; fork-only code lives in its own files
 (`graphify/extractors/bicep.py`, `graphify/iac.py`, `graphify/iac_link.py`,
-`graphify/cochange.py`) with small hooks into upstream modules.
+`graphify/fork_affected.py`) with small hooks into upstream modules.
 
 ### Install
 
@@ -118,10 +118,13 @@ uv tool install ".[bicep,terraform,mcp]"
   - **infra↔app linking** — `INFERRED` `consumed_by` edges from a Bicep/Terraform
     `output` to the application-code symbol that shares its name (exact
     normalized match, length floor, stoplist, uniqueness — high precision).
-- **Co-change enrichment** (optional) — `graphify cochange` augments a built
-  graph with statistically-significant **`co_changes_with`** edges mined from
-  git history by the standalone [graphmine](https://github.com/PaavoReinikka/graphmine)
-  tool (see below).
+- **IaC-aware blast radius** — `graphify affected` and the MCP server's new
+  `affected` tool also follow `deploys` / `module_source` / `depends_on` /
+  `parent` on IaC graphs, so changing a Bicep or Terraform module reports the
+  stacks that deploy it (non-IaC graphs keep upstream's relation set).
+- **MCP server additions** — the `affected` tool; `get_node` shows an IaC
+  summary (lang / kind / type / env / layer); stats and the confidence audit
+  list every confidence tier present instead of only the core three.
 
 ### Recommended usage (no API key, Claude Code as the LLM endpoint)
 
@@ -143,50 +146,13 @@ binary (Claude Code), so it uses your Claude subscription instead of an
 `ANTHROPIC_API_KEY`. Inside the `/graphify` skill the IDE session already
 provides the model, so no key is needed there either.
 
-### Co-change enrichment with graphmine (optional)
+### Co-change coupling: use graphmine directly
 
-[graphmine](https://github.com/PaavoReinikka/graphmine) mines statistically
-significant **co-change** couplings from git history — files that evolve together
-far more than chance (generated-together files, dev↔prod params, a SQL table and
-its triggers) — which static structure can't see. It is a standalone tool
-powered by [Kingfisher](https://github.com/PaavoReinikka/kingfisher-bnb) (the
-`kingfisher-bnb` wheel on PyPI, prebuilt — no Rust toolchain needed);
-`graphify cochange` shells out to it, so there is no hard dependency.
-
-```bash
-uv tool install git+https://github.com/PaavoReinikka/graphmine   # once
-graphify extract . --backend claude-cli    # build graphify-out/graph.json
-graphify cochange .                        # add co_changes_with edges
-```
-
-This writes `graphify-out/cochange.md` (a clustered digest) and
-`graphify-out/cochange.graphify.json` (a copy of the graph **plus** additive
-`co_changes_with` edges — a `STATISTICAL` confidence tier carrying the raw
-Fisher p-value); `graph.json` is left untouched. graphify only owns `[repo]`,
-`--graph` and `--update-instructions`; every other flag (`--alpha`,
-`--subsystem-depth`, `--significance tarone`, `--exclude`, `--include-deleted`,
-…) is forwarded to `graphmine cochange` unchanged — see `graphmine cochange --help`.
-If graphmine isn't on PATH the command prints an install hint and exits.
-
-Blast radius then includes co-change partners automatically: `graphify affected`
-and the MCP server's `affected` tool pick up the `cochange.graphify.json` next to
-`graph.json`, follow co-change edges in both directions, and tag those hits
-`[co_changes_with]` next to the structural ones. Other tools and the plain graph
-are unchanged.
-
-```bash
-graphify affected src/app/client.py
-```
-
-Add `--update-instructions` to also teach your assistant about the layer: it
-appends a `## graphify: co-change` section (telling the model to use the
-co-change layer for impact / refactoring questions) to every graphify-configured
-instruction file (`CLAUDE.md`, `AGENTS.md`, …). It's **opt-in**, idempotent, and
-only touches files that already have graphify's `## graphify` block:
-
-```bash
-graphify cochange . --update-instructions
-```
+Git co-change mining lives in the standalone
+[graphmine](https://github.com/PaavoReinikka/graphmine) tool, which has its own
+CLI, MCP server (`blast_radius`) and skill; this fork no longer wraps it. Its
+graphify adapter still writes a `cochange.graphify.json` (graph.json plus
+`co_changes_with` edges) that plain graphify tools can read via `--graph`.
 
 ### Planned / deferred
 
