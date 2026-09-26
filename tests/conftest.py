@@ -90,3 +90,12 @@ def pytest_collection_modifyitems(items: list[Any]) -> None:
             continue
         for warning_filter in _ANALYZE_WARNING_FILTERS:
             item.add_marker(pytest.mark.filterwarnings(warning_filter))
+
+
+@pytest.fixture(autouse=True)
+def _fork_llm_auto_backend(monkeypatch):
+    """Fork: LLM use is opt-in (graphify/llm_policy.py). Upstream's tests exercise
+    its auto-detection, which the fork keeps behind GRAPHIFY_BACKEND=auto, so run
+    them in that mode. The fork's own opt-in tests override or unset it."""
+    monkeypatch.setenv("GRAPHIFY_BACKEND", "auto")
+    monkeypatch.delenv("GRAPHIFY_CLAUDE_CLI_MODEL", raising=False)

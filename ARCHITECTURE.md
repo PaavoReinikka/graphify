@@ -35,6 +35,7 @@ Signatures below are the real ones - `tests/test_architecture_doc.py` imports ev
 | `iac.py` | `IaCGraphBuilder` | *(fork)* shared node/edge bookkeeping for declarative infra-as-code extractors (`extractors/bicep.py`) |
 | `iac_link.py` | `link_iac(G)` | *(fork)* post-merge enrichment of infra graphs, run inside `build_from_json`: Terraform `iac_*` annotation, resource-type hubs, env/layer scoping, output → app-code `consumed_by` links. No-op on non-IaC graphs, idempotent, disabled by `GRAPHIFY_NO_IAC_LINK=1` |
 | `fork_affected.py` | `default_relations(G)` | *(fork)* default `affected` relation set: upstream's, plus the IaC dependency relations on IaC graphs |
+| `llm_policy.py` | `resolve(explicit, model)`, `announce(choice, purpose)`, `not_selected_message(purpose, fallback)` | *(fork)* opt-in LLM selection: `--backend` / `GRAPHIFY_BACKEND` → backend + model (claude-cli defaults to sonnet), announced; none selected → offline path |
 
 ### Calling `extract()` from your own code
 

@@ -126,25 +126,48 @@ uv tool install ".[bicep,terraform,mcp]"
   summary (lang / kind / type / env / layer); stats and the confidence audit
   list every confidence tier present instead of only the core three.
 
-### Recommended usage (no API key, Claude Code as the LLM endpoint)
+### LLM use is opt-in (Claude Code as the default endpoint)
 
 Code and infrastructure are extracted locally (tree-sitter AST) and need **no
-LLM at all**. For the parts that do need a model — docs, PDFs, images,
-transcripts — this fork is meant to run with **Claude Code as the synthetic LLM
-endpoint via your subscription**, with no API key:
+LLM at all**. Only a few operations can use a model: semantic extraction of
+docs / PDFs / images, `--dedup-llm`, community naming (`cluster-only`, `label`)
+and PR triage (`prs --triage`). Upstream picks a model on its own — whichever
+API key it finds first, or the local `claude` CLI — so in this fork **nothing
+calls an LLM unless you selected one**, and every call is announced:
 
-```bash
-# code/IaC only — fully offline, no key, no backend flag needed:
-graphify extract ./infra
-
-# whole repo (code + docs/images) using the Claude Code CLI as the model:
-graphify extract . --backend claude-cli
+```
+[graphify] community naming (14 communities): calling LLM via claude-cli (Claude Code, your subscription), model sonnet (selected by GRAPHIFY_BACKEND).
 ```
 
-`--backend claude-cli` routes semantic extraction through the local `claude`
-binary (Claude Code), so it uses your Claude subscription instead of an
-`ANTHROPIC_API_KEY`. Inside the `/graphify` skill the IDE session already
-provides the model, so no key is needed there either.
+Set it once (Windows, persistent for new shells):
+
+```powershell
+setx GRAPHIFY_BACKEND claude-cli
+# optional, default is sonnet:
+setx GRAPHIFY_CLAUDE_CLI_MODEL opus
+```
+
+- `claude-cli` routes calls through your local Claude Code (your subscription,
+  no API key). Its model defaults to **Sonnet** — enough for graphify's
+  structured extraction and naming; set `GRAPHIFY_CLAUDE_CLI_MODEL=opus` (or
+  pass `--model opus`) for Opus. Without this, `claude -p` would run on your
+  Claude Code default model.
+- `--backend <name>` / `--model <name>` on a command override the environment
+  for that run (e.g. `--backend ollama`, `--backend azure` later).
+- With nothing selected, each operation takes its offline path — communities
+  are named after their hub node, triage is skipped — and says how to enable an
+  LLM; `extract` on a corpus with docs stops and suggests `--code-only`.
+- `GRAPHIFY_BACKEND=auto` restores upstream's auto-detection;
+  `GRAPHIFY_BACKEND=none` forces offline.
+
+```bash
+graphify extract ./infra --code-only     # code/IaC only — never needs an LLM
+graphify extract .                       # + docs, via GRAPHIFY_BACKEND
+graphify cluster-only . --no-label       # skip naming for this run
+```
+
+Inside the `/graphify` skill the IDE session itself is the model, so none of
+this applies there.
 
 ### Co-change coupling: use graphmine directly
 

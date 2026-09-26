@@ -2258,11 +2258,32 @@ def dispatch_command(cmd: str) -> None:
                     for cid, members in communities.items()
                     if cid not in existing_labels or existing_labels.get(cid) == f"Community {cid}"
                 }
-            generated_labels, _ = generate_community_labels(
-                G, label_communities_input, backend=label_backend, model=label_model, gods=gods,
-                max_concurrency=label_max_concurrency, batch_size=label_batch_size,
-                usage_out=label_token_usage,
-            )
+            # Fork: opt-in LLM (graphify/llm_policy.py). With none selected keep
+            # the deterministic hub labels instead of auto-detecting a key or
+            # silently shelling out to the `claude` CLI.
+            from graphify import llm_policy as _llm_policy
+            _purpose = f"community naming ({len(label_communities_input)} communities)"
+            try:
+                _label_choice = _llm_policy.resolve(
+                    label_backend, label_model, auto=_llm_policy.detect_or_claude_cli
+                )
+            except ValueError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                sys.exit(1)
+            if _label_choice is None:
+                if label_communities_input:
+                    print(_llm_policy.not_selected_message(
+                        _purpose, "keeping names from each community's hub node"
+                    ), file=sys.stderr)
+                generated_labels = {}
+            else:
+                _llm_policy.announce(_label_choice, _purpose)
+                generated_labels, _ = generate_community_labels(
+                    G, label_communities_input, backend=_label_choice.backend,
+                    model=_label_choice.model, gods=gods,
+                    max_concurrency=label_max_concurrency, batch_size=label_batch_size,
+                    usage_out=label_token_usage,
+                )
             # Only let the LLM OVERRIDE where it produced a real name — its no-backend
             # fallback returns "Community {cid}" placeholders, which must not clobber
             # the deterministic hub labels. Also reject a model echoing the prompt
@@ -3695,6 +3716,39 @@ def dispatch_command(cmd: str) -> None:
             _get_backend_api_key,
         )
         needs_llm = bool(semantic_files) or dedup_llm
+        # Fork: LLM use is opt-in (graphify/llm_policy.py): --backend or
+        # GRAPHIFY_BACKEND selects it and the call is announced with backend,
+        # model and how it was chosen. GRAPHIFY_BACKEND=auto falls through to
+        # upstream's key detection below, unchanged.
+        if needs_llm:
+            from graphify import llm_policy as _llm_policy
+            _purposes = []
+            if semantic_files:
+                _purposes.append(f"semantic extraction of {len(semantic_files)} doc/paper/image file(s)")
+            if dedup_llm:
+                _purposes.append("--dedup-llm")
+            _purpose = " + ".join(_purposes)
+            try:
+                _choice = _llm_policy.resolve(backend, model, auto=_detect_backend)
+            except ValueError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                sys.exit(1)
+            if _choice is not None:
+                backend = _choice.backend
+                if _choice.model is not None:
+                    model = _choice.model
+                _llm_policy.announce(_choice, _purpose)
+            elif not _llm_policy.is_auto():
+                print(
+                    "error: " + _llm_policy.not_selected_message(
+                        _purpose, "cannot continue without one"
+                    ).removeprefix("[graphify] ")
+                    + ("\n           Or pass --code-only to index just the code "
+                       "(local AST, no LLM) and skip the non-code files."
+                       if semantic_files else ""),
+                    file=sys.stderr,
+                )
+                sys.exit(1)
         if backend is None and needs_llm:
             backend = _detect_backend()
         if backend is not None and backend not in _BACKENDS:

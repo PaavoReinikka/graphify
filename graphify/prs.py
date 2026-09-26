@@ -568,29 +568,39 @@ _TRIAGE_MODEL_DEFAULTS: dict[str, str] = {
 }
 
 
-def _resolve_triage_backend() -> tuple[str, str]:
-    """Return (backend, model) using GRAPHIFY_TRIAGE_BACKEND or first available key."""
-    from graphify.llm import BACKENDS, _get_backend_api_key, _default_model_for_backend
-
-    explicit = os.environ.get("GRAPHIFY_TRIAGE_BACKEND", "").strip()
-    if explicit in BACKENDS:
-        model = (os.environ.get("GRAPHIFY_TRIAGE_MODEL")
-                 or _TRIAGE_MODEL_DEFAULTS.get(explicit)
-                 or _default_model_for_backend(explicit))
-        return explicit, model
-
+def _upstream_triage_auto() -> str:
+    """Upstream's triage detection, used only under GRAPHIFY_BACKEND=auto."""
+    import shutil
+    from graphify.llm import _get_backend_api_key
     for b in ("claude", "kimi", "openai", "gemini"):
         if _get_backend_api_key(b):
-            model = (os.environ.get("GRAPHIFY_TRIAGE_MODEL")
-                     or _TRIAGE_MODEL_DEFAULTS.get(b)
-                     or _default_model_for_backend(b))
-            return b, model
-
-    import shutil
+            return b
     if shutil.which("claude"):
-        return "claude-cli", "claude-code-plan"
+        return "claude-cli"
+    return "ollama"
 
-    return "ollama", _default_model_for_backend("ollama")
+
+def _resolve_triage_backend() -> "tuple[str, str, str] | None":
+    """Return (backend, model, source), or None when no LLM is selected.
+
+    Fork: opt-in only (graphify/llm_policy.py). GRAPHIFY_TRIAGE_BACKEND, else
+    GRAPHIFY_BACKEND; upstream's walk over whichever API key happens to be set,
+    then the `claude` CLI, then ollama, only runs under GRAPHIFY_BACKEND=auto.
+    """
+    from graphify import llm_policy
+    from graphify.llm import _default_model_for_backend
+
+    explicit = os.environ.get("GRAPHIFY_TRIAGE_BACKEND", "").strip() or None
+    choice = llm_policy.resolve(explicit, auto=_upstream_triage_auto)
+    if choice is None:
+        return None
+    source = "GRAPHIFY_TRIAGE_BACKEND" if explicit else choice.source
+    b = choice.backend
+    model = (os.environ.get("GRAPHIFY_TRIAGE_MODEL")
+             or (choice.model if b == "claude-cli" else None)
+             or _TRIAGE_MODEL_DEFAULTS.get(b)
+             or _default_model_for_backend(b))
+    return b, model, source
 
 
 def triage_with_opus(prs: list[PRInfo], base: str) -> None:
@@ -622,10 +632,19 @@ def triage_with_opus(prs: list[PRInfo], base: str) -> None:
     )
 
     try:
-        backend, model = _resolve_triage_backend()
+        resolved = _resolve_triage_backend()
     except Exception as e:
         print(red(f"  Could not resolve triage backend: {e}"), file=sys.stderr)
         sys.exit(1)
+    if resolved is None:
+        from graphify import llm_policy
+        print(llm_policy.not_selected_message("PR triage", "skipping the ranking"),
+              file=sys.stderr)
+        return
+    backend, model, _source = resolved
+    from graphify import llm_policy
+    llm_policy.announce(llm_policy.Choice(backend, model, _source),
+                        f"PR triage ({len(candidates)} PRs)")
 
     print()
     print(bold("  Triage") + dim(f" ({backend} / {model})"))
@@ -665,8 +684,11 @@ def triage_with_opus(prs: list[PRInfo], base: str) -> None:
             _claude = "claude"
             if _platform.system() == "Windows":
                 _claude = _shutil.which("claude.cmd") or _shutil.which("claude") or "claude"
+            _cli_args = [_claude, "-p", "--no-session-persistence"]
+            if model and model != "claude-code-plan":
+                _cli_args += ["--model", model]
             proc = _sp.run(
-                [_claude, "-p", "--no-session-persistence"],
+                _cli_args,
                 input=prompt, capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=120,
             )
